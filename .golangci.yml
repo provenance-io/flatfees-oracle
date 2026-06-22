@@ -1,0 +1,7 @@
+# golangci-lint v2 configuration.
+# Requires golangci-lint >= v2 (built with Go >= the go.mod target, 1.25.x).
+version: "2"
+
+linters:
+  # The "standard" set: errcheck, govet, ineffassign, staticcheck, unused.
+  default: standard
