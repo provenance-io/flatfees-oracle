@@ -5,3 +5,13 @@ version: "2"
 linters:
   # The "standard" set: errcheck, govet, ineffassign, staticcheck, unused.
   default: standard
+
+formatters:
+  enable:
+    - gofmt     # canonical gofmt formatting
+    - goimports # gofmt + import grouping/ordering
+  settings:
+    goimports:
+      # Group this module's imports into their own block.
+      local-prefixes:
+        - github.com/provenance-io/flatfees-oracle

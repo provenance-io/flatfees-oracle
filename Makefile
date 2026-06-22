@@ -2,7 +2,7 @@ IMAGE ?= flatfees-oracle
 TAG   ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo dev)
 BIN   ?= bin/flatfees-oracle
 
-.PHONY: build compile test vet lint tidy run docker clean all
+.PHONY: build compile test vet lint fmt tidy run docker clean all
 
 all: vet test build
 
@@ -28,6 +28,10 @@ vet:
 
 lint:
 	golangci-lint run
+
+# fmt applies the configured formatters (gofmt + goimports) in place.
+fmt:
+	golangci-lint fmt
 
 tidy:
 	go mod tidy
