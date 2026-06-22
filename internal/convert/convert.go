@@ -132,9 +132,9 @@ func roundHalfUp(r *big.Rat) *big.Int {
 	num := new(big.Int).Set(r.Num())
 	den := new(big.Int).Set(r.Denom())
 
-	twoNum := new(big.Int).Lsh(num, 1)     // 2*num
-	twoNum.Add(twoNum, den)                // 2*num + den
-	twoDen := new(big.Int).Lsh(den, 1)     // 2*den
+	twoNum := new(big.Int).Lsh(num, 1)      // 2*num
+	twoNum.Add(twoNum, den)                 // 2*num + den
+	twoDen := new(big.Int).Lsh(den, 1)      // 2*den
 	return new(big.Int).Quo(twoNum, twoDen) // integer (truncated) division
 }
 
