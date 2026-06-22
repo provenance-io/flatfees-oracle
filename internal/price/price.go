@@ -184,7 +184,7 @@ func (c *Client) doFetch(ctx context.Context, url string) (matches []Match, retr
 	if err != nil {
 		return nil, true, fmt.Errorf("GET %s: %w", url, err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck // There's nothing we can do with an error from this.
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))

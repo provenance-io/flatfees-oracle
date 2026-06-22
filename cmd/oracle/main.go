@@ -96,7 +96,7 @@ func run() error {
 		log.Error("grpc connect failed", "error", err.Error(), "endpoint", cfg.GRPCEndpoint, "outcome", "failed")
 		return err
 	}
-	defer conn.Close()
+	defer conn.Close() //nolint:errcheck // There's nothing we can do with an error from this.
 	reader := chain.NewReader(conn)
 
 	// 4. Read current params: authorization + skip-if-unchanged.
