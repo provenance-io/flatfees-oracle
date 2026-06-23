@@ -8,6 +8,9 @@
 *.so
 *.dylib
 
+# Build output
+/bin/
+
 # Test binary, built with `go test -c`
 *.test
 
@@ -27,6 +30,13 @@ go.work.sum
 # env file
 .env
 
+.DS_Store
+
 # Editor/IDE
-# .idea/
-# .vscode/
+.idea/
+.vscode/
+
+# emacs tmp files
+.#*
+# vim tmp files
+*.swp

@@ -1,0 +1,135 @@
+// Package chain talks to a Provenance node's x/flatfees module: it reads the
+// current conversion factor (and oracle list), maps a computed factor into the
+// module's types, estimates gas/fees via CalculateTxFees, and submits a
+// MsgUpdateConversionFactorRequest signed by the oracle key.
+//
+// It imports the real Provenance and Cosmos SDK types:
+//   - github.com/provenance-io/provenance/x/flatfees/types
+//   - github.com/cosmos/cosmos-sdk/types (sdk.Coin)
+//   - cosmossdk.io/math (math.Int)
+//
+// IMPORTANT build note: because this module imports github.com/provenance-io/
+// provenance, go.mod MUST mirror provenance's `replace` directives (notably the
+// cosmos-sdk -> provenance-io/cosmos-sdk fork). Run `go mod tidy` locally after
+// adding the deps. This code could not be compiled in the authoring environment
+// (no Go toolchain / no module network), so verify signatures against
+// cosmos-sdk v0.53 when wiring the broadcast path.
+package chain
+
+import (
+	"context"
+	"fmt"
+	"math/big"
+
+	"cosmossdk.io/math"
+	sdk "github.com/cosmos/cosmos-sdk/types"
+	grpc1 "github.com/cosmos/gogoproto/grpc"
+	"google.golang.org/grpc"
+
+	flatfeestypes "github.com/provenance-io/provenance/x/flatfees/types"
+
+	"github.com/provenance-io/flatfees-oracle/internal/convert"
+)
+
+// QueryClient is the subset of the flatfees query client this package needs.
+// flatfeestypes.QueryClient satisfies it; narrowing the interface keeps the
+// read path unit-testable with a fake.
+type QueryClient interface {
+	Params(ctx context.Context, in *flatfeestypes.QueryParamsRequest, opts ...grpc.CallOption) (*flatfeestypes.QueryParamsResponse, error)
+	CalculateTxFees(ctx context.Context, in *flatfeestypes.QueryCalculateTxFeesRequest, opts ...grpc.CallOption) (*flatfeestypes.QueryCalculateTxFeesResponse, error)
+}
+
+// Reader reads flatfees state from a node.
+type Reader struct {
+	qc QueryClient
+}
+
+// NewReader builds a Reader from a gRPC client connection (e.g. the one returned
+// by grpc.Dial against the node's gRPC endpoint).
+func NewReader(conn grpc1.ClientConn) *Reader {
+	return &Reader{qc: flatfeestypes.NewQueryClient(conn)}
+}
+
+// NewReaderWithClient is for tests: inject a fake QueryClient.
+func NewReaderWithClient(qc QueryClient) *Reader {
+	return &Reader{qc: qc}
+}
+
+// CurrentParams returns the live flatfees params, including the current
+// conversion factor and the set of authorized oracle addresses.
+func (r *Reader) CurrentParams(ctx context.Context) (flatfeestypes.Params, error) {
+	resp, err := r.qc.Params(ctx, &flatfeestypes.QueryParamsRequest{})
+	if err != nil {
+		return flatfeestypes.Params{}, fmt.Errorf("query flatfees params: %w", err)
+	}
+	return resp.Params, nil
+}
+
+// EstimateTxFees runs the CalculateTxFees query for an encoded (unsigned) tx,
+// returning the estimated gas and the flat total fee to set on the tx.
+func (r *Reader) EstimateTxFees(ctx context.Context, txBytes []byte, gasAdjustment float32) (*flatfeestypes.QueryCalculateTxFeesResponse, error) {
+	resp, err := r.qc.CalculateTxFees(ctx, &flatfeestypes.QueryCalculateTxFeesRequest{
+		TxBytes:       txBytes,
+		GasAdjustment: gasAdjustment,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("calculate tx fees: %w", err)
+	}
+	return resp, nil
+}
+
+// ToModuleFactor maps a computed convert.ConversionFactor into the flatfees
+// module's ConversionFactor, with the fixed denoms (musd / nhash).
+func ToModuleFactor(f convert.ConversionFactor) (flatfeestypes.ConversionFactor, error) {
+	defAmt, ok := intFromBig(f.DefinitionAmount)
+	if !ok {
+		return flatfeestypes.ConversionFactor{}, fmt.Errorf("invalid definition_amount %v", f.DefinitionAmount)
+	}
+	convAmt, ok := intFromBig(f.ConvertedAmount)
+	if !ok {
+		return flatfeestypes.ConversionFactor{}, fmt.Errorf("invalid converted_amount %v", f.ConvertedAmount)
+	}
+	return flatfeestypes.ConversionFactor{
+		DefinitionAmount: sdk.NewCoin(convert.DenomMusd, defAmt),
+		ConvertedAmount:  sdk.NewCoin(convert.DenomNhash, convAmt),
+	}, nil
+}
+
+// SameFactor reports whether a freshly computed factor equals the one currently
+// on chain. Used for the skip-if-unchanged decision. Compared field-by-field to
+// avoid depending on a specific sdk.Coin equality method name across SDK versions.
+func SameFactor(current flatfeestypes.ConversionFactor, computed flatfeestypes.ConversionFactor) bool {
+	return coinEqual(current.DefinitionAmount, computed.DefinitionAmount) &&
+		coinEqual(current.ConvertedAmount, computed.ConvertedAmount)
+}
+
+func coinEqual(a, b sdk.Coin) bool {
+	return a.Denom == b.Denom && a.Amount.Equal(b.Amount)
+}
+
+// BuildUpdateMsg constructs the MsgUpdateConversionFactorRequest. authority must
+// be a bech32 address that is registered in the module's oracle_addresses.
+func BuildUpdateMsg(authority string, factor flatfeestypes.ConversionFactor) *flatfeestypes.MsgUpdateConversionFactorRequest {
+	return &flatfeestypes.MsgUpdateConversionFactorRequest{
+		Authority:        authority,
+		ConversionFactor: factor,
+	}
+}
+
+// IsAuthorizedOracle reports whether addr is in the module's oracle address list.
+func IsAuthorizedOracle(params flatfeestypes.Params, addr string) bool {
+	for _, o := range params.OracleAddresses {
+		if o == addr {
+			return true
+		}
+	}
+	return false
+}
+
+// intFromBig converts a *big.Int to cosmossdk.io/math.Int, rejecting nil/negative.
+func intFromBig(b *big.Int) (math.Int, bool) {
+	if b == nil || b.Sign() < 0 {
+		return math.Int{}, false
+	}
+	return math.NewIntFromBigInt(b), true
+}
