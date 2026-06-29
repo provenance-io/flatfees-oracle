@@ -26,8 +26,7 @@ import (
 )
 
 var (
-	errUnauthorized           = errors.New("oracle address not in module oracle_addresses")
-	errBroadcastUnimplemented = errors.New("tx broadcast not yet implemented")
+	errUnauthorized = errors.New("oracle address not in module oracle_addresses")
 )
 
 func main() {
