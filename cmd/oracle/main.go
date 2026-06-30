@@ -44,6 +44,10 @@ func run() error {
 	}
 
 	log := logging.New(cfg.LogLevel, cfg.Env)
+	if err := tx.SetChainConfigFromAddress(cfg.OracleAddress); err != nil {
+		log.Error("invalid oracle address", "error", err.Error(), "outcome", "failed")
+		return err
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 

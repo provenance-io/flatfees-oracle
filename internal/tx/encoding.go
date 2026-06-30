@@ -1,6 +1,9 @@
 package tx
 
 import (
+	"fmt"
+
+	txsigning "cosmossdk.io/x/tx/signing"
 	"github.com/cosmos/cosmos-sdk/client"
 	"github.com/cosmos/cosmos-sdk/codec"
 	"github.com/cosmos/cosmos-sdk/codec/address"
@@ -8,11 +11,10 @@ import (
 	cryptocodec "github.com/cosmos/cosmos-sdk/crypto/codec"
 	"github.com/cosmos/cosmos-sdk/std"
 	sdk "github.com/cosmos/cosmos-sdk/types"
+	"github.com/cosmos/cosmos-sdk/types/bech32"
 	authtx "github.com/cosmos/cosmos-sdk/x/auth/tx"
 	authtypes "github.com/cosmos/cosmos-sdk/x/auth/types"
 	"github.com/cosmos/gogoproto/proto"
-
-	txsigning "cosmossdk.io/x/tx/signing"
 
 	flatfeestypes "github.com/provenance-io/provenance/x/flatfees/types"
 )
@@ -70,4 +72,22 @@ func NewEncoding() (codec.Codec, client.TxConfig, error) {
 		return nil, nil, err
 	}
 	return cdc, txConfig, nil
+}
+
+// SetChainConfigFromAddress derives the bech32 prefix from an account address
+// (e.g. "tp1..." -> "tp") and sets/seals the global SDK config accordingly.
+// Must run before any other address is parsed. Because the prefix comes from the
+// oracle address itself, the signer can never derive a mismatching prefix.
+func SetChainConfigFromAddress(addr string) error {
+	hrp, _, err := bech32.DecodeAndConvert(addr)
+	if err != nil {
+		return fmt.Errorf("decode oracle address %q: %w", addr, err)
+	}
+	c := sdk.GetConfig()
+	c.SetPurpose(purpose)
+	c.SetBech32PrefixForAccount(hrp, hrp+"pub")
+	c.SetBech32PrefixForValidator(hrp+"valoper", hrp+"valoperpub")
+	c.SetBech32PrefixForConsensusNode(hrp+"valcons", hrp+"valconspub")
+	c.Seal()
+	return nil
 }
