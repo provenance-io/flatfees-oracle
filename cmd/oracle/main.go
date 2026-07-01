@@ -44,10 +44,6 @@ func run() error {
 	}
 
 	log := logging.New(cfg.LogLevel, cfg.Env)
-	if err := tx.SetChainConfigFromAddress(cfg.OracleAddress); err != nil {
-		log.Error("invalid oracle address", "error", err.Error(), "outcome", "failed")
-		return err
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
@@ -92,6 +88,11 @@ func run() error {
 		return nil
 	}
 
+	// Set the bech32 prefix from the oracle address (only needed when signing).
+	if err := tx.SetChainConfigFromAddress(cfg.OracleAddress); err != nil {
+		log.Error("invalid oracle address", "error", err.Error(), "outcome", "failed")
+		return err
+	}
 	// 3. Connect to the node.
 	// NOTE: insecure transport by default — switch to TLS credentials for any
 	// non-local endpoint. Wire credentials per the cluster's conventions.
@@ -150,11 +151,15 @@ func run() error {
 		Logger:        log,
 	}
 
+	// Submit under a FRESH timeout.
+	submitCtx, submitCancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer submitCancel()
+
 	var hash string
 	if cfg.Unordered {
-		hash, err = submitter.SubmitUnordered(ctx, msg, cfg.AccountNumber, cfg.HasAccountNumber, cfg.UnorderedTimeout)
+		hash, err = submitter.SubmitUnordered(submitCtx, msg, cfg.AccountNumber, cfg.HasAccountNumber, cfg.UnorderedTimeout)
 	} else {
-		hash, err = submitter.SubmitOrdered(ctx, msg)
+		hash, err = submitter.SubmitOrdered(submitCtx, msg)
 	}
 	if err != nil {
 		log.Error("submit failed", "unordered", cfg.Unordered, "tx_hash", hash, "error", err.Error(), "outcome", "failed")

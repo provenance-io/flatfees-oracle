@@ -22,26 +22,35 @@ import (
 const (
 	prefixMainNet = "pb"
 	prefixTestNet = "tp"
-	coinTypeMain  = uint32(505)
-	coinTypeTest  = uint32(1)
-	purpose       = 44
 )
+
+// SetSDKConfig sets the global bech32 prefixes for the given account prefix and seals the config.
+func SetSDKConfig(hrp string) {
+	c := sdk.GetConfig()
+	c.SetBech32PrefixForAccount(hrp, hrp+"pub")
+	c.SetBech32PrefixForValidator(hrp+"valoper", hrp+"valoperpub")
+	c.SetBech32PrefixForConsensusNode(hrp+"valcons", hrp+"valconspub")
+	c.Seal()
+}
 
 // SetChainConfig configures Provenance bech32 prefixes and coin type; must run before any address parsing.
 func SetChainConfig(testnet bool) {
-	prefix := prefixMainNet
-	coinType := coinTypeMain
+	hrp := prefixMainNet
 	if testnet {
-		prefix = prefixTestNet
-		coinType = coinTypeTest
+		hrp = prefixTestNet
 	}
-	c := sdk.GetConfig()
-	c.SetCoinType(coinType)
-	c.SetPurpose(purpose)
-	c.SetBech32PrefixForAccount(prefix, prefix+"pub")
-	c.SetBech32PrefixForValidator(prefix+"valoper", prefix+"valoperpub")
-	c.SetBech32PrefixForConsensusNode(prefix+"valcons", prefix+"valconspub")
-	c.Seal()
+	SetSDKConfig(hrp)
+}
+
+// SetChainConfigFromAddress derives the prefix from an account address
+// oracle address itself, the signer can never derive a mismatching prefix.
+func SetChainConfigFromAddress(addr string) error {
+	hrp, _, err := bech32.DecodeAndConvert(addr)
+	if err != nil {
+		return fmt.Errorf("decode oracle address %q: %w", addr, err)
+	}
+	SetSDKConfig(hrp)
+	return nil
 }
 
 // NewEncoding creates codec and TxConfig for client message and account types; requires SetChainConfig first.
@@ -72,22 +81,4 @@ func NewEncoding() (codec.Codec, client.TxConfig, error) {
 		return nil, nil, err
 	}
 	return cdc, txConfig, nil
-}
-
-// SetChainConfigFromAddress derives the bech32 prefix from an account address
-// (e.g. "tp1..." -> "tp") and sets/seals the global SDK config accordingly.
-// Must run before any other address is parsed. Because the prefix comes from the
-// oracle address itself, the signer can never derive a mismatching prefix.
-func SetChainConfigFromAddress(addr string) error {
-	hrp, _, err := bech32.DecodeAndConvert(addr)
-	if err != nil {
-		return fmt.Errorf("decode oracle address %q: %w", addr, err)
-	}
-	c := sdk.GetConfig()
-	c.SetPurpose(purpose)
-	c.SetBech32PrefixForAccount(hrp, hrp+"pub")
-	c.SetBech32PrefixForValidator(hrp+"valoper", hrp+"valoperpub")
-	c.SetBech32PrefixForConsensusNode(hrp+"valcons", hrp+"valconspub")
-	c.Seal()
-	return nil
 }
