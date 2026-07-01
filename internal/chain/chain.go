@@ -22,7 +22,9 @@ import (
 	"math/big"
 
 	"cosmossdk.io/math"
+	"github.com/cosmos/cosmos-sdk/codec"
 	sdk "github.com/cosmos/cosmos-sdk/types"
+	authtypes "github.com/cosmos/cosmos-sdk/x/auth/types"
 	grpc1 "github.com/cosmos/gogoproto/grpc"
 	"google.golang.org/grpc"
 
@@ -132,4 +134,18 @@ func intFromBig(b *big.Int) (math.Int, bool) {
 		return math.Int{}, false
 	}
 	return math.NewIntFromBigInt(b), true
+}
+
+// AccountInfo queries the auth module for an account's number and sequence.
+func AccountInfo(ctx context.Context, conn grpc1.ClientConn, cdc codec.Codec, addr string) (accNum, sequence uint64, err error) {
+	qc := authtypes.NewQueryClient(conn)
+	resp, err := qc.Account(ctx, &authtypes.QueryAccountRequest{Address: addr})
+	if err != nil {
+		return 0, 0, fmt.Errorf("query account %s: %w", addr, err)
+	}
+	var acc sdk.AccountI
+	if err := cdc.UnpackAny(resp.Account, &acc); err != nil {
+		return 0, 0, fmt.Errorf("unpack account %s: %w", addr, err)
+	}
+	return acc.GetAccountNumber(), acc.GetSequence(), nil
 }

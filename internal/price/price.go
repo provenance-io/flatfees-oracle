@@ -26,11 +26,14 @@ const (
 	timeFormat = "2006-01-02T15:04:05.000000000Z"
 )
 
+// numStr stores API decimal (string or number) as-is for exact big.Rat parsing.
+type numStr string
+
 // Match is a single trade entry from the API.
 type Match struct {
 	ID               string `json:"id"`
-	Price            string `json:"price"`
-	Quantity         string `json:"quantity"`
+	Price            numStr `json:"price"`
+	Quantity         numStr `json:"quantity"`
 	Created          string `json:"created"`
 	SettlementTxHash string `json:"settlementTxHash"`
 }
@@ -208,11 +211,11 @@ func VWAP(matches []Match) (*big.Rat, error) {
 
 	counted := 0
 	for i, m := range matches {
-		p, ok := new(big.Rat).SetString(m.Price)
+		p, ok := new(big.Rat).SetString(string(m.Price))
 		if !ok {
 			return nil, fmt.Errorf("trade %d: invalid price %q", i, m.Price)
 		}
-		q, ok := new(big.Rat).SetString(m.Quantity)
+		q, ok := new(big.Rat).SetString(string(m.Quantity))
 		if !ok {
 			return nil, fmt.Errorf("trade %d: invalid quantity %q", i, m.Quantity)
 		}
@@ -228,4 +231,21 @@ func VWAP(matches []Match) (*big.Rat, error) {
 		return nil, fmt.Errorf("no trades with positive quantity to average")
 	}
 	return new(big.Rat).Quo(numerator, denominator), nil
+}
+
+func (n *numStr) UnmarshalJSON(b []byte) error {
+	if string(b) == "null" {
+		*n = ""
+		return nil
+	}
+	if len(b) > 0 && b[0] == '"' {
+		var s string
+		if err := json.Unmarshal(b, &s); err != nil {
+			return err
+		}
+		*n = numStr(s)
+		return nil
+	}
+	*n = numStr(b) // bare number form, e.g. 0.025 or 2.5e-2
+	return nil
 }
