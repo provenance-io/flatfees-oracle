@@ -42,8 +42,7 @@ func SetChainConfig(testnet bool) {
 	SetSDKConfig(hrp)
 }
 
-// SetChainConfigFromAddress derives the prefix from an account address
-// oracle address itself, the signer can never derive a mismatching prefix.
+// SetChainConfigFromAddress derives the hrp from an account address and sets the sdk config accordingly.
 func SetChainConfigFromAddress(addr string) error {
 	hrp, _, err := bech32.DecodeAndConvert(addr)
 	if err != nil {
