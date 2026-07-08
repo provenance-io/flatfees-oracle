@@ -118,8 +118,8 @@ func Load() (Config, error) {
 		if len(missing) > 0 {
 			return Config{}, fmt.Errorf("missing required config: %s", strings.Join(missing, ", "))
 		}
-		if c.Unordered && c.UnorderedTimeout >= 5*time.Minute {
-			return Config{}, fmt.Errorf("UNORDERED_TIMEOUT %s must be under the chain max of 5m", c.UnorderedTimeout)
+		if c.Unordered && c.UnorderedTimeout > 5*time.Minute {
+			return Config{}, fmt.Errorf("UNORDERED_TIMEOUT %s must be at most the chain max of 5m", c.UnorderedTimeout)
 		}
 	}
 
