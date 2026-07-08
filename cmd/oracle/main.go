@@ -111,8 +111,7 @@ func run() error {
 		return err
 	}
 	if !chain.IsAuthorizedOracle(params, cfg.OracleAddress) {
-		log.Error("oracle address not authorized",
-			"oracle_address", cfg.OracleAddress, "outcome", "failed")
+		log.Error("oracle address not authorized", "oracle_address", cfg.OracleAddress, "outcome", "failed")
 		return errUnauthorized
 	}
 	if chain.SameFactor(params.ConversionFactor, modFactor) {
@@ -132,8 +131,7 @@ func run() error {
 		return err
 	}
 	if signer.Address() != cfg.OracleAddress {
-		log.Error("key/address mismatch",
-			"derived", signer.Address(), "configured", cfg.OracleAddress, "outcome", "failed")
+		log.Error("key/address mismatch", "derived", signer.Address(), "configured", cfg.OracleAddress, "outcome", "failed")
 		return errors.New("derived address does not match ORACLE_ADDRESS")
 	}
 
@@ -157,7 +155,7 @@ func run() error {
 
 	var hash string
 	if cfg.Unordered {
-		hash, err = submitter.SubmitUnordered(submitCtx, msg, cfg.AccountNumber, cfg.HasAccountNumber, cfg.UnorderedTimeout)
+		hash, err = submitter.SubmitUnordered(submitCtx, msg, cfg.UnorderedTimeout)
 	} else {
 		hash, err = submitter.SubmitOrdered(submitCtx, msg)
 	}

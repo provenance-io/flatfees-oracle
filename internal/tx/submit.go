@@ -52,12 +52,10 @@ func (s *Submitter) SubmitOrdered(ctx context.Context, msg sdk.Msg) (string, err
 }
 
 // SubmitUnordered builds, signs, and broadcasts an unordered tx using timeout-based replay protection.
-func (s *Submitter) SubmitUnordered(ctx context.Context, msg sdk.Msg, accNum uint64, accNumKnown bool, timeout time.Duration) (string, error) {
-	if !accNumKnown {
-		var err error
-		if accNum, _, err = s.Account(ctx, s.Signer.Address()); err != nil {
-			return "", err
-		}
+func (s *Submitter) SubmitUnordered(ctx context.Context, msg sdk.Msg, timeout time.Duration) (string, error) {
+	accNum, _, err := s.Account(ctx, s.Signer.Address())
+	if err != nil {
+		return "", err
 	}
 	simBytes, err := s.Signer.SimUnordered(msg, timeout)
 	if err != nil {

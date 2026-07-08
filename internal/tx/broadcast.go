@@ -85,16 +85,3 @@ func (b *Broadcaster) BroadcastAndConfirm(ctx context.Context, txBytes []byte) (
 	}
 	return hash, nil
 }
-
-// HasEvent reports whether the response contains an event of the given type.
-func HasEvent(resp *sdk.TxResponse, eventType string) bool {
-	if resp == nil {
-		return false
-	}
-	for _, e := range resp.Events {
-		if e.Type == eventType {
-			return true
-		}
-	}
-	return false
-}

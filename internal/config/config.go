@@ -41,12 +41,6 @@ type Config struct {
 	// HTTPTimeout bounds outbound price requests.
 	HTTPTimeout time.Duration
 
-	// AccountNumber, if set, is used for signing instead of querying the chain.
-	AccountNumber uint64
-
-	// HasAccountNumber reports whether AccountNumber was explicitly provided.
-	HasAccountNumber bool
-
 	// Unordered submits updates as unordered transactions without using account sequence numbers.
 	Unordered bool
 
@@ -68,7 +62,7 @@ func Load() (Config, error) {
 		GasAdjustment:    1.5,
 		DryRun:           getBool("DRY_RUN", false),
 		HTTPTimeout:      15 * time.Second,
-		Unordered:        getBool("UNORDERED", true),
+		Unordered:        getBool("UNORDERED", false),
 		UnorderedTimeout: 2 * time.Minute,
 	}
 
