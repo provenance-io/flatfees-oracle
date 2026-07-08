@@ -155,7 +155,7 @@ func run() error {
 
 	var hash string
 	if cfg.Unordered {
-		hash, err = submitter.SubmitUnordered(submitCtx, msg, cfg.UnorderedTimeout)
+		hash, err = submitter.SubmitUnordered(submitCtx, msg, cfg.AccountNumber, cfg.UnorderedTimeout)
 	} else {
 		hash, err = submitter.SubmitOrdered(submitCtx, msg)
 	}

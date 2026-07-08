@@ -38,6 +38,11 @@ type Config struct {
 	// DryRun, when true, computes and logs the factor but never broadcasts.
 	DryRun bool
 
+	// AccountNumber, if non-zero, is used when signing unordered txs instead of
+	// querying the chain each run. The account number is immutable, and a real
+	// oracle account is never number 0, so zero means "not set — look it up".
+	AccountNumber uint64
+
 	// HTTPTimeout bounds outbound price requests.
 	HTTPTimeout time.Duration
 
@@ -62,7 +67,7 @@ func Load() (Config, error) {
 		GasAdjustment:    1.5,
 		DryRun:           getBool("DRY_RUN", false),
 		HTTPTimeout:      15 * time.Second,
-		Unordered:        getBool("UNORDERED", false),
+		Unordered:        getBool("UNORDERED", true),
 		UnorderedTimeout: 2 * time.Minute,
 	}
 
@@ -79,6 +84,13 @@ func Load() (Config, error) {
 			return Config{}, fmt.Errorf("invalid HTTP_TIMEOUT %q: %w", v, err)
 		}
 		c.HTTPTimeout = d
+	}
+	if v := os.Getenv("ACCOUNT_NUMBER"); v != "" {
+		n, err := strconv.ParseUint(v, 10, 64)
+		if err != nil {
+			return Config{}, fmt.Errorf("invalid ACCOUNT_NUMBER %q: %w", v, err)
+		}
+		c.AccountNumber = n
 	}
 
 	// In non-dry-run mode the chain settings are required.
