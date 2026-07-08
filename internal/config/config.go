@@ -57,9 +57,10 @@ type Config struct {
 	// Default is 15 seconds (15s) if not set.
 	HTTPTimeout time.Duration
 
-	// Unordered submits updates as unordered transactions without using account sequence numbers.
+	// Unordered, if true, submits updates as unordered transactions without using account sequence numbers.
+	// If false, submits updates as regular transactions by looking up the account's sequence first.
 	// Environment variable: UNORDERED.
-	// Default is false if not set.
+	// Default is true if not set.
 	Unordered bool
 
 	// UnorderedTimeout sets the timeout for unordered transactions and must be less than 5 minutes.
