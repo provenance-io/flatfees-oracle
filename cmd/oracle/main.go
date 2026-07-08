@@ -22,11 +22,11 @@ import (
 	"github.com/provenance-io/flatfees-oracle/internal/convert"
 	"github.com/provenance-io/flatfees-oracle/internal/logging"
 	"github.com/provenance-io/flatfees-oracle/internal/price"
+	"github.com/provenance-io/flatfees-oracle/internal/tx"
 )
 
 var (
-	errUnauthorized           = errors.New("oracle address not in module oracle_addresses")
-	errBroadcastUnimplemented = errors.New("tx broadcast not yet implemented")
+	errUnauthorized = errors.New("oracle address not in module oracle_addresses")
 )
 
 func main() {
@@ -88,6 +88,11 @@ func run() error {
 		return nil
 	}
 
+	// Set the bech32 prefix from the oracle address (only needed when signing).
+	if err := tx.SetChainConfigFromAddress(cfg.OracleAddress); err != nil {
+		log.Error("invalid oracle address", "error", err.Error(), "outcome", "failed")
+		return err
+	}
 	// 3. Connect to the node.
 	// NOTE: insecure transport by default — switch to TLS credentials for any
 	// non-local endpoint. Wire credentials per the cluster's conventions.
@@ -106,8 +111,7 @@ func run() error {
 		return err
 	}
 	if !chain.IsAuthorizedOracle(params, cfg.OracleAddress) {
-		log.Error("oracle address not authorized",
-			"oracle_address", cfg.OracleAddress, "outcome", "failed")
+		log.Error("oracle address not authorized", "oracle_address", cfg.OracleAddress, "outcome", "failed")
 		return errUnauthorized
 	}
 	if chain.SameFactor(params.ConversionFactor, modFactor) {
@@ -115,22 +119,51 @@ func run() error {
 		return nil
 	}
 
+	cdc, txConfig, err := tx.NewEncoding()
+	if err != nil {
+		log.Error("encoding setup failed", "error", err.Error(), "outcome", "failed")
+		return err
+	}
+
+	signer, err := tx.NewSigner(cfg.PrivateKeyHex, cfg.ChainID, txConfig)
+	if err != nil {
+		log.Error("signer init failed", "error", err.Error(), "outcome", "failed")
+		return err
+	}
+	if signer.Address() != cfg.OracleAddress {
+		log.Error("key/address mismatch", "derived", signer.Address(), "configured", cfg.OracleAddress, "outcome", "failed")
+		return errors.New("derived address does not match ORACLE_ADDRESS")
+	}
+
 	// 5. Build the update message and estimate gas/fees.
 	msg := chain.BuildUpdateMsg(cfg.OracleAddress, modFactor)
-	_ = msg // consumed by the broadcast step below
 
-	// TODO(broadcast): build + sign + broadcast the tx, then confirm inclusion.
-	// The flow is: encode the unsigned tx -> reader.EstimateTxFees(ctx, txBytes,
-	// cfg.GasAdjustment) to get EstimatedGas + flat TotalFees -> set gas/fee ->
-	// sign with the mounted oracle key (keyring) -> BroadcastTx in sync mode ->
-	// poll for the tx hash and verify success (and EventConversionFactorUpdated).
-	// This requires the team's standard cosmos-sdk client.Context + keyring setup,
-	// so it is intentionally left as the final wiring step.
-	log.Error("broadcast not yet implemented",
-		"authority", cfg.OracleAddress,
-		"definition_amount", modFactor.DefinitionAmount.String(),
-		"converted_amount", modFactor.ConvertedAmount.String(),
-		"outcome", "failed",
-	)
-	return errBroadcastUnimplemented
+	submitter := &tx.Submitter{
+		Signer:      signer,
+		Estimator:   reader, // *chain.Reader satisfies tx.Estimator
+		Broadcaster: tx.NewBroadcaster(conn),
+		Account: func(ctx context.Context, addr string) (uint64, uint64, error) {
+			return chain.AccountInfo(ctx, conn, cdc, addr)
+		},
+		GasAdjustment: cfg.GasAdjustment,
+		Logger:        log,
+	}
+
+	// Submit under a FRESH timeout.
+	submitCtx, submitCancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer submitCancel()
+
+	var hash string
+	if cfg.Unordered {
+		hash, err = submitter.SubmitUnordered(submitCtx, msg, cfg.AccountNumber, cfg.UnorderedTimeout)
+	} else {
+		hash, err = submitter.SubmitOrdered(submitCtx, msg)
+	}
+	if err != nil {
+		log.Error("submit failed", "unordered", cfg.Unordered, "tx_hash", hash, "error", err.Error(), "outcome", "failed")
+		return err
+	}
+	log.Info("conversion factor updated", "tx_hash", hash, "unordered", cfg.Unordered, "outcome", "submitted")
+
+	return nil
 }

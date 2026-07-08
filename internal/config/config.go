@@ -28,9 +28,9 @@ type Config struct {
 	// OracleAddress is the bech32 address of the signing oracle key; it must be
 	// registered in the module's oracle_addresses.
 	OracleAddress string
-	// KeyringDir / KeyName / mnemonic source are intentionally left to the
-	// broadcast wiring; see internal/chain. The signing secret must be mounted,
-	// never baked into the image.
+
+	// Hex-encoded secp256k1 private key for signing update transactions; must derive to OracleAddress.
+	PrivateKeyHex string
 
 	// GasAdjustment multiplies the simulated gas from CalculateTxFees.
 	GasAdjustment float32
@@ -38,23 +38,37 @@ type Config struct {
 	// DryRun, when true, computes and logs the factor but never broadcasts.
 	DryRun bool
 
+	// AccountNumber, if non-zero, is used when signing unordered txs instead of
+	// querying the chain each run. The account number is immutable, and a real
+	// oracle account is never number 0, so zero means "not set — look it up".
+	AccountNumber uint64
+
 	// HTTPTimeout bounds outbound price requests.
 	HTTPTimeout time.Duration
+
+	// Unordered submits updates as unordered transactions without using account sequence numbers.
+	Unordered bool
+
+	// UnorderedTimeout sets the timeout for unordered transactions and must be less than 5 minutes.
+	UnorderedTimeout time.Duration
 }
 
 // Load reads configuration from environment variables, applying defaults and
 // validating required fields.
 func Load() (Config, error) {
 	c := Config{
-		Env:           getEnv("ORACLE_ENV", "unknown"),
-		LogLevel:      strings.ToLower(getEnv("LOG_LEVEL", "info")),
-		PriceBaseURL:  os.Getenv("PRICE_BASE_URL"),
-		GRPCEndpoint:  os.Getenv("GRPC_ENDPOINT"),
-		ChainID:       os.Getenv("CHAIN_ID"),
-		OracleAddress: os.Getenv("ORACLE_ADDRESS"),
-		GasAdjustment: 1.5,
-		DryRun:        getBool("DRY_RUN", false),
-		HTTPTimeout:   15 * time.Second,
+		Env:              getEnv("ORACLE_ENV", "unknown"),
+		LogLevel:         strings.ToLower(getEnv("LOG_LEVEL", "info")),
+		PriceBaseURL:     os.Getenv("PRICE_BASE_URL"),
+		GRPCEndpoint:     os.Getenv("GRPC_ENDPOINT"),
+		ChainID:          os.Getenv("CHAIN_ID"),
+		OracleAddress:    os.Getenv("ORACLE_ADDRESS"),
+		PrivateKeyHex:    os.Getenv("PRIVATE_KEY_HEX"),
+		GasAdjustment:    1.5,
+		DryRun:           getBool("DRY_RUN", false),
+		HTTPTimeout:      15 * time.Second,
+		Unordered:        getBool("UNORDERED", true),
+		UnorderedTimeout: 2 * time.Minute,
 	}
 
 	if v := os.Getenv("GAS_ADJUSTMENT"); v != "" {
@@ -71,6 +85,13 @@ func Load() (Config, error) {
 		}
 		c.HTTPTimeout = d
 	}
+	if v := os.Getenv("ACCOUNT_NUMBER"); v != "" {
+		n, err := strconv.ParseUint(v, 10, 64)
+		if err != nil {
+			return Config{}, fmt.Errorf("invalid ACCOUNT_NUMBER %q: %w", v, err)
+		}
+		c.AccountNumber = n
+	}
 
 	// In non-dry-run mode the chain settings are required.
 	if !c.DryRun {
@@ -84,8 +105,14 @@ func Load() (Config, error) {
 		if c.OracleAddress == "" {
 			missing = append(missing, "ORACLE_ADDRESS")
 		}
+		if c.PrivateKeyHex == "" {
+			missing = append(missing, "PRIVATE_KEY_HEX")
+		}
 		if len(missing) > 0 {
 			return Config{}, fmt.Errorf("missing required config: %s", strings.Join(missing, ", "))
+		}
+		if c.Unordered && c.UnorderedTimeout >= 5*time.Minute {
+			return Config{}, fmt.Errorf("UNORDERED_TIMEOUT %s must be under the chain max of 5m", c.UnorderedTimeout)
 		}
 	}
 
