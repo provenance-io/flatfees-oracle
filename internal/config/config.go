@@ -4,6 +4,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -14,48 +15,70 @@ import (
 // Config holds the oracle's runtime settings.
 type Config struct {
 	// Env is a label for logs/metrics, e.g. "testnet" or "mainnet".
+	// Environment variable: ORACLE_ENV.
+	// Default is "unknown" if not set.
 	Env string
 	// LogLevel is one of debug|info|warn|error.
+	// Environment variable: LOG_LEVEL.
+	// Default is "info" if not set.
 	LogLevel string
 
 	// PriceBaseURL overrides the Figure Markets trades endpoint (optional).
+	// Environment variable: PRICE_BASE_URL.
 	PriceBaseURL string
 
 	// GRPCEndpoint is the Provenance node gRPC address (host:port).
+	// Environment variable: GRPC_ENDPOINT.
 	GRPCEndpoint string
 	// ChainID is the target chain id.
+	// Environment variable: CHAIN_ID.
 	ChainID string
 	// OracleAddress is the bech32 address of the signing oracle key; it must be
 	// registered in the module's oracle_addresses.
+	// Environment variable: ORACLE_ADDRESS.
 	OracleAddress string
 
 	// Hex-encoded secp256k1 private key for signing update transactions; must derive to OracleAddress.
+	// Environment variable: PRIVATE_KEY_HEX.
 	PrivateKeyHex string
 
 	// GasAdjustment multiplies the simulated gas from CalculateTxFees.
+	// Environment variable: GAS_ADJUSTMENT.
+	// Default is 1.5 if not set.
 	GasAdjustment float32
 
 	// DryRun, when true, computes and logs the factor but never broadcasts.
+	// Environment variable: DRY_RUN.
+	// Default is false if not set.
 	DryRun bool
+
+	// HTTPTimeout bounds outbound price requests.
+	// Environment variable: HTTP_TIMEOUT.
+	// Default is 15 seconds (15s) if not set.
+	HTTPTimeout time.Duration
+
+	// Unordered submits updates as unordered transactions without using account sequence numbers.
+	// Environment variable: UNORDERED.
+	// Default is false if not set.
+	Unordered bool
+
+	// UnorderedTimeout sets the timeout for unordered transactions and must be less than 5 minutes.
+	// Default is 2 minutes (2m) if not set. Ignored if Unordered is false.
+	// Environment variable: UNORDERED_TIMEOUT.
+	UnorderedTimeout time.Duration
 
 	// AccountNumber, if non-zero, is used when signing unordered txs instead of
 	// querying the chain each run. The account number is immutable, and a real
 	// oracle account is never number 0, so zero means "not set — look it up".
+	// Environment variable: ACCOUNT_NUMBER.
+	// Default is 0 (zero) if not set.
 	AccountNumber uint64
-
-	// HTTPTimeout bounds outbound price requests.
-	HTTPTimeout time.Duration
-
-	// Unordered submits updates as unordered transactions without using account sequence numbers.
-	Unordered bool
-
-	// UnorderedTimeout sets the timeout for unordered transactions and must be less than 5 minutes.
-	UnorderedTimeout time.Duration
 }
 
 // Load reads configuration from environment variables, applying defaults and
 // validating required fields.
 func Load() (Config, error) {
+	et := &errorTracker{}
 	c := Config{
 		Env:              getEnv("ORACLE_ENV", "unknown"),
 		LogLevel:         strings.ToLower(getEnv("LOG_LEVEL", "info")),
@@ -64,33 +87,16 @@ func Load() (Config, error) {
 		ChainID:          os.Getenv("CHAIN_ID"),
 		OracleAddress:    os.Getenv("ORACLE_ADDRESS"),
 		PrivateKeyHex:    os.Getenv("PRIVATE_KEY_HEX"),
-		GasAdjustment:    1.5,
-		DryRun:           getBool("DRY_RUN", false),
-		HTTPTimeout:      15 * time.Second,
-		Unordered:        getBool("UNORDERED", true),
-		UnorderedTimeout: 2 * time.Minute,
+		GasAdjustment:    getFloat32("GAS_ADJUSTMENT", 1.5, et),
+		DryRun:           getBool("DRY_RUN", false, et),
+		HTTPTimeout:      getDuration("HTTP_TIMEOUT", 15*time.Second, et),
+		Unordered:        getBool("UNORDERED", true, et),
+		UnorderedTimeout: getDuration("UNORDERED_TIMEOUT", 2*time.Minute, et),
+		AccountNumber:    getUint64("ACCOUNT_NUMBER", 0, et),
 	}
 
-	if v := os.Getenv("GAS_ADJUSTMENT"); v != "" {
-		f, err := strconv.ParseFloat(v, 32)
-		if err != nil {
-			return Config{}, fmt.Errorf("invalid GAS_ADJUSTMENT %q: %w", v, err)
-		}
-		c.GasAdjustment = float32(f)
-	}
-	if v := os.Getenv("HTTP_TIMEOUT"); v != "" {
-		d, err := time.ParseDuration(v)
-		if err != nil {
-			return Config{}, fmt.Errorf("invalid HTTP_TIMEOUT %q: %w", v, err)
-		}
-		c.HTTPTimeout = d
-	}
-	if v := os.Getenv("ACCOUNT_NUMBER"); v != "" {
-		n, err := strconv.ParseUint(v, 10, 64)
-		if err != nil {
-			return Config{}, fmt.Errorf("invalid ACCOUNT_NUMBER %q: %w", v, err)
-		}
-		c.AccountNumber = n
+	if et.HasError() {
+		return Config{}, et.GetError()
 	}
 
 	// In non-dry-run mode the chain settings are required.
@@ -126,14 +132,87 @@ func getEnv(key, def string) string {
 	return def
 }
 
-func getBool(key string, def bool) bool {
+// An errorTracker holds a list of errors.
+type errorTracker struct {
+	Errors []error
+}
+
+// Append adds an error to this errorTracker.
+func (e *errorTracker) Append(err error) {
+	e.Errors = append(e.Errors, err)
+}
+
+// GetError returns a single error representing all the errors in this errorTracker.
+// Returns nil, if there aren't any errors in this errorTracker.
+func (e *errorTracker) GetError() error {
+	return errors.Join(e.Errors...)
+}
+
+// HasError returns true if this errorTracker contains an error, false if empty.
+func (e *errorTracker) HasError() bool {
+	return len(e.Errors) > 0
+}
+
+// getBool looks up the env var with the provided key and converts it to a bool.
+// Returns def if the env var isn't set or if there's a problem parsing it.
+// If there's a problem parsing it, an error is added to the provided errorTracker.
+func getBool(key string, def bool, et *errorTracker) bool {
 	v := os.Getenv(key)
 	if v == "" {
 		return def
 	}
-	b, err := strconv.ParseBool(v)
+	rv, err := strconv.ParseBool(v)
 	if err != nil {
+		et.Append(fmt.Errorf("invalid %s bool %q: %w", key, v, err))
 		return def
 	}
-	return b
+	return rv
+}
+
+// getFloat32 looks up the env var with the provided key and converts it to a float32.
+// Returns def if the env var isn't set or if there's a problem parsing it.
+// If there's a problem parsing it, an error is added to the provided errorTracker.
+func getFloat32(key string, def float32, et *errorTracker) float32 {
+	v := os.Getenv(key)
+	if v == "" {
+		return def
+	}
+	rv, err := strconv.ParseFloat(v, 32)
+	if err != nil {
+		et.Append(fmt.Errorf("invalid %s float %q: %w", key, v, err))
+		return def
+	}
+	return float32(rv)
+}
+
+// getDuration looks up the env var with the provided key and converts it to a time.Duration.
+// Returns def if the env var isn't set or if there's a problem parsing it.
+// If there's a problem parsing it, an error is added to the provided errorTracker.
+func getDuration(key string, def time.Duration, et *errorTracker) time.Duration {
+	v := os.Getenv(key)
+	if v == "" {
+		return def
+	}
+	rv, err := time.ParseDuration(v)
+	if err != nil {
+		et.Append(fmt.Errorf("invalid %s duration %q: %w", key, v, err))
+		return def
+	}
+	return rv
+}
+
+// getUint64 looks up the env var with the provided key and converts it to a uint64.
+// Returns def if the env var isn't set or if there's a problem parsing it.
+// If there's a problem parsing it, an error is added to the provided errorTracker.
+func getUint64(key string, def uint64, et *errorTracker) uint64 {
+	v := os.Getenv(key)
+	if v == "" {
+		return def
+	}
+	rv, err := strconv.ParseUint(v, 10, 64)
+	if err != nil {
+		et.Append(fmt.Errorf("invalid %s uint64 %q: %w", key, v, err))
+		return def
+	}
+	return rv
 }
