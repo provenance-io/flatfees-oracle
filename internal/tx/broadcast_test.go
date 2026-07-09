@@ -206,6 +206,47 @@ func TestConfirmTimeoutSurfacesLastError(t *testing.T) {
 	assert.ErrorContains(t, err, "tx not found")
 }
 
+func TestConfirmNilTxResponseTimesOutReadably(t *testing.T) {
+	// GetTx returns (non-nil, nil) with an empty TxResponse for the whole poll
+	// window. Without the errNilTxResponse sentinel the wrapped error would
+	// render "%!w(<nil>)"; assert the readable message instead.
+	svc := &fakeTxSvc{
+		getTxFn: func(_ context.Context, _ *txtypes.GetTxRequest) (*txtypes.GetTxResponse, error) {
+			return &txtypes.GetTxResponse{TxResponse: nil}, nil
+		},
+	}
+	b := NewBroadcasterWithClient(svc)
+	b.PollTimeout = 40 * time.Millisecond
+	b.PollInterval = 10 * time.Millisecond
+
+	_, err := b.Confirm(context.Background(), "ABC")
+	require.Error(t, err)
+	assert.ErrorIs(t, err, errNilTxResponse,
+		"nil TxResponse must be recorded as the sentinel, not silently as nil")
+	assert.ErrorContains(t, err, "not confirmed within")
+	assert.NotContains(t, err.Error(), "%!w",
+		"formatting must not fall through to %%!w(<nil>)")
+}
+
+func TestConfirmHandlesNilResponseWithoutPanic(t *testing.T) {
+	// Some proxies/mocks can return (nil, nil). The old code would nil-deref on
+	// resp.TxResponse; the new guard treats it as a transient failure.
+	svc := &fakeTxSvc{
+		getTxFn: func(_ context.Context, _ *txtypes.GetTxRequest) (*txtypes.GetTxResponse, error) {
+			return nil, nil //nolint:nilnil // intentional: exercising the nil,nil guard
+		},
+	}
+	b := NewBroadcasterWithClient(svc)
+	b.PollTimeout = 40 * time.Millisecond
+	b.PollInterval = 10 * time.Millisecond
+
+	require.NotPanics(t, func() {
+		_, err := b.Confirm(context.Background(), "ABC")
+		require.Error(t, err)
+		assert.ErrorIs(t, err, errNilTxResponse)
+	})
+}
+
 func TestConfirmRespectsContextCancellation(t *testing.T) {
 	svc := &fakeTxSvc{
 		getTxFn: func(_ context.Context, _ *txtypes.GetTxRequest) (*txtypes.GetTxResponse, error) {

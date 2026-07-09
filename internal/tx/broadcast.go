@@ -12,6 +12,10 @@ import (
 	txtypes "github.com/cosmos/cosmos-sdk/types/tx"
 )
 
+// errNilTxResponse is recorded in lastErr when GetTx returns success with no
+// TxResponse — without this the timeout message would render `%!w(<nil>)`.
+var errNilTxResponse = errors.New("GetTx returned nil TxResponse")
+
 // Broadcaster submits signed transactions and waits for confirmation.
 type Broadcaster struct {
 	svc          txtypes.ServiceClient
@@ -56,14 +60,18 @@ func (b *Broadcaster) Confirm(ctx context.Context, hash string) (*sdk.TxResponse
 	var lastErr error
 	for {
 		resp, err := b.svc.GetTx(ctx, &txtypes.GetTxRequest{Hash: hash})
-		if err == nil && resp.TxResponse != nil {
+		if err == nil && resp != nil && resp.TxResponse != nil {
 			if resp.TxResponse.Code != 0 {
 				return resp.TxResponse, fmt.Errorf("tx %s failed in deliverTx: code %d: %s",
 					hash, resp.TxResponse.Code, resp.TxResponse.RawLog)
 			}
 			return resp.TxResponse, nil
 		}
-		lastErr = err
+		if err != nil {
+			lastErr = err
+		} else {
+			lastErr = errNilTxResponse
+		}
 		if time.Now().After(deadline) {
 			return nil, fmt.Errorf("tx %s not confirmed within %s: %w", hash, b.PollTimeout, lastErr)
 		}
