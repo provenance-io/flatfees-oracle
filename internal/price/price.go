@@ -121,27 +121,65 @@ func (c *Client) window() (time.Time, time.Time) {
 	return startUTC, endUTC
 }
 
-// fetchAll paginates through all trades between start and end.
+// fetchAll paginates through all trades between start and end. It advances the
+// cursor to the last trade's timestamp (not +1ms), so the next page overlaps
+// by any trades sharing that instant; a composite dedupe key drops the overlap
+// without losing sub-millisecond neighbours. Trades outside [start, end) are
+// discarded defensively — the API is asked to respect the window but not
+// trusted to.
 func (c *Client) fetchAll(ctx context.Context, start, end time.Time) ([]Match, error) {
 	var all []Match
+	seen := make(map[string]struct{})
 	cursor := start
 	for {
 		batch, err := c.fetchPage(ctx, cursor, end)
 		if err != nil {
 			return nil, err
 		}
-		all = append(all, batch...)
-		if len(batch) < c.PageSize {
+
+		added := 0
+		for _, m := range batch {
+			key := dedupeKey(m)
+			if _, dup := seen[key]; dup {
+				continue
+			}
+			t, err := time.Parse(timeFormat, m.Created)
+			if err != nil {
+				return nil, fmt.Errorf("parse created time %q: %w", m.Created, err)
+			}
+			if t.Before(start) || !t.Before(end) {
+				continue // API returned a trade outside the requested window; ignore
+			}
+			seen[key] = struct{}{}
+			all = append(all, m)
+			added++
+		}
+
+		// Stop when the page is short (nothing more to fetch) or when we
+		// made no forward progress (server stuck, or every remaining trade
+		// falls outside the window). Either way, further pages can't help.
+		if len(batch) < c.PageSize || added == 0 {
 			break
 		}
+
 		last := batch[len(batch)-1]
 		t, err := time.Parse(timeFormat, last.Created)
 		if err != nil {
 			return nil, fmt.Errorf("parse created time %q: %w", last.Created, err)
 		}
-		cursor = t.Add(time.Millisecond)
+		cursor = t
 	}
 	return all, nil
+}
+
+// dedupeKey picks the best available unique identifier for a trade. Prefers
+// the API's `id`; falls back to settlementTxHash + created + price + quantity
+// so pagination stays correct even if the response ever omits `id`.
+func dedupeKey(m Match) string {
+	if m.ID != "" {
+		return "id:" + m.ID
+	}
+	return "c:" + m.SettlementTxHash + "|" + m.Created + "|" + string(m.Price) + "|" + string(m.Quantity)
 }
 
 // fetchPage retrieves a single page, retrying transient failures with backoff.

@@ -50,11 +50,11 @@ func TestVWAPErrors(t *testing.T) {
 func TestGetPricePaginates(t *testing.T) {
 	pageSize := 2
 	page1 := []Match{
-		{Price: "0.05", Quantity: "10", Created: "2026-06-15T00:00:00.000000000Z"},
-		{Price: "0.05", Quantity: "10", Created: "2026-06-15T00:00:01.000000000Z"},
+		{ID: "1", Price: "0.05", Quantity: "10", Created: "2026-06-15T00:00:00.000000000Z"},
+		{ID: "2", Price: "0.05", Quantity: "10", Created: "2026-06-15T00:00:01.000000000Z"},
 	}
 	page2 := []Match{
-		{Price: "0.07", Quantity: "20", Created: "2026-06-15T00:00:02.000000000Z"},
+		{ID: "3", Price: "0.07", Quantity: "20", Created: "2026-06-15T00:00:02.000000000Z"},
 	}
 
 	var calls int
@@ -83,6 +83,78 @@ func TestGetPricePaginates(t *testing.T) {
 		"VWAP = %s, want 0.06", res.PriceUSDPerHASH.FloatString(6))
 }
 
+// TestGetPriceDedupesPageOverlap: the server returns the last trade of page 1
+// as the first trade of page 2 (i.e. inclusive start_date). Cursor advancement
+// refetches that boundary; the dedupe key must drop the repeat so the
+// aggregated result matches the underlying set.
+func TestGetPriceDedupesPageOverlap(t *testing.T) {
+	pageSize := 2
+	boundary := Match{ID: "2", Price: "0.05", Quantity: "10", Created: "2026-06-15T00:00:01.000000000Z"}
+	page1 := []Match{
+		{ID: "1", Price: "0.05", Quantity: "10", Created: "2026-06-15T00:00:00.000000000Z"},
+		boundary,
+	}
+	page2 := []Match{
+		boundary, // <- overlap
+		{ID: "3", Price: "0.07", Quantity: "20", Created: "2026-06-15T00:00:02.000000000Z"},
+	}
+	page3 := []Match{} // short → stop
+
+	var calls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		var batch []Match
+		switch calls {
+		case 1:
+			batch = page1
+		case 2:
+			batch = page2
+		default:
+			batch = page3
+		}
+		_ = json.NewEncoder(w).Encode(response{Matches: batch})
+	}))
+	defer srv.Close()
+
+	c := New()
+	c.BaseURL = srv.URL
+	c.PageSize = pageSize
+	c.MaxRetries = 0
+	c.Now = func() time.Time { return time.Date(2026, 6, 16, 12, 0, 0, 0, time.UTC) }
+
+	res, err := c.GetPrice(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, 3, res.Trades, "boundary trade should be counted once, not twice")
+	// VWAP = (0.05*10 + 0.05*10 + 0.07*20)/40 = 2.4/40 = 0.06
+	assert.Zerof(t, res.PriceUSDPerHASH.Cmp(big.NewRat(6, 100)),
+		"VWAP = %s, want 0.06", res.PriceUSDPerHASH.FloatString(6))
+}
+
+// TestGetPriceIgnoresOutOfWindowTrades: the server misbehaves and returns a
+// trade whose timestamp falls after end. It must be discarded.
+func TestGetPriceIgnoresOutOfWindowTrades(t *testing.T) {
+	// window() for Now = 2026-06-16 12:00 UTC ends at 2026-06-16 00:00 Eastern
+	// (== 2026-06-16 04:00 UTC). An "in-window" trade must be strictly before that.
+	in := Match{ID: "in", Price: "0.05", Quantity: "10", Created: "2026-06-15T12:00:00.000000000Z"}
+	out := Match{ID: "out", Price: "9.99", Quantity: "10", Created: "2026-06-16T23:59:00.000000000Z"}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(response{Matches: []Match{in, out}})
+	}))
+	defer srv.Close()
+
+	c := New()
+	c.BaseURL = srv.URL
+	c.MaxRetries = 0
+	c.Now = func() time.Time { return time.Date(2026, 6, 16, 12, 0, 0, 0, time.UTC) }
+
+	res, err := c.GetPrice(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, 1, res.Trades, "out-of-window trade must be dropped")
+	assert.Zerof(t, res.PriceUSDPerHASH.Cmp(big.NewRat(5, 100)),
+		"VWAP = %s, want 0.05", res.PriceUSDPerHASH.FloatString(6))
+}
+
 func TestGetPriceRetriesOn5xx(t *testing.T) {
 	var calls int
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -91,7 +163,9 @@ func TestGetPriceRetriesOn5xx(t *testing.T) {
 			http.Error(w, "boom", http.StatusInternalServerError)
 			return
 		}
-		_ = json.NewEncoder(w).Encode(response{Matches: []Match{{Price: "0.05", Quantity: "1"}}})
+		_ = json.NewEncoder(w).Encode(response{Matches: []Match{
+			{ID: "1", Price: "0.05", Quantity: "1", Created: "2026-06-15T00:00:00.000000000Z"},
+		}})
 	}))
 	defer srv.Close()
 
