@@ -43,21 +43,25 @@ internal/logging/   structured JSON logging (slog)
 
 ## Configuration (environment)
 
-| Var | Required | Default | Notes |
-|-----|----------|---------|-------|
-| `ORACLE_ENV` | no | `unknown` | label for logs, e.g. `testnet`/`mainnet` |
-| `LOG_LEVEL` | no | `info` | `debug|info|warn|error` |
-| `GRPC_ENDPOINT` | yes¹ | – | Provenance node gRPC `host:port` |
-| `CHAIN_ID` | yes¹ | – | target chain id |
-| `ORACLE_ADDRESS` | yes¹ | – | bech32 signer; must be in `oracle_addresses` |
-| `GAS_ADJUSTMENT` | no | `1.2` | multiplier on simulated gas |
-| `PRICE_BASE_URL` | no | Figure Markets URL | override price endpoint |
-| `HTTP_TIMEOUT` | no | `15s` | price request timeout |
-| `DRY_RUN` | no | `false` | compute + log, never broadcast |
+| Var                 | Required | Default            | Notes                                                                                                |
+|---------------------|----------|--------------------|------------------------------------------------------------------------------------------------------|
+| `ORACLE_ENV`        | no       | `unknown`          | label for logs, e.g. `testnet`/`mainnet`                                                             |
+| `LOG_LEVEL`         | no       | `info`             | debug, info, warn, or error                                                                          |
+| `GRPC_ENDPOINT`     | yes¹     | –                  | Provenance node gRPC `host:port`                                                                     |
+| `GRPC_INSECURE`     | no       | `false`            | plaintext gRPC transport; only for in-cluster / localhost endpoints on a trusted network             |
+| `CHAIN_ID`          | yes¹     | –                  | target chain id                                                                                      |
+| `ORACLE_ADDRESS`    | yes¹     | –                  | bech32 signer; must be in x/flatfees params `oracle_addresses` list                                  |
+| `PRIVATE_KEY_HEX`   | yes¹     | –                  | hex-encoded secp256k1 private key for signing; must derive to `ORACLE_ADDRESS`                       |
+| `GAS_ADJUSTMENT`    | no       | `1.5`              | multiplier on simulated gas                                                                          |
+| `UNORDERED`         | no       | `true`             | submit as an unordered tx (timeout-based replay protection) rather than by account sequence          |
+| `UNORDERED_TIMEOUT` | no       | `2m`               | timeout for unordered txs; must be ≤ chain max of `5m`. Ignored when `UNORDERED=false`               |
+| `ACCOUNT_NUMBER`    | no       | `0`                | when non-zero, used when signing unordered txs instead of querying the chain. `0` means "look it up" |
+| `PRICE_BASE_URL`    | no       | Figure Markets URL | override price endpoint                                                                              |
+| `HTTP_TIMEOUT`      | no       | `15s`              | price request timeout                                                                                |
+| `DRY_RUN`           | no       | `false`            | compute + log, never broadcast                                                                       |
 
-¹ Required only when `DRY_RUN` is false. The signing key itself is mounted as a
-secret and consumed by the broadcast wiring (see below) — never bake it into the
-image.
+¹ Required only when `DRY_RUN` is false. `PRIVATE_KEY_HEX` must be mounted as a
+Kubernetes secret — never bake it into the image.
 
 ## Develop
 
@@ -76,9 +80,3 @@ types. Provenance pins cosmos-sdk to a fork via `replace`, so **go.mod mirrors
 provenance's `replace` directives** — these must stay in sync with the pinned
 provenance version. After changing any dependency, run `go mod tidy` and commit
 `go.sum`.
-
-## Status / TODO
-
-- **Broadcast** (`cmd/oracle`): the tx **sign + broadcast + confirm** step is
-  marked `TODO` — it needs the team's standard cosmos-sdk `client.Context` +
-  keyring setup. Read/compute/estimate paths and message construction are done.
