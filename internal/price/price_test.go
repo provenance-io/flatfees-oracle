@@ -194,7 +194,7 @@ func TestGetPriceEmptyWindow(t *testing.T) {
 	c.Now = func() time.Time { return time.Date(2026, 6, 16, 12, 0, 0, 0, time.UTC) }
 
 	_, err := c.GetPrice(context.Background())
-	assert.ErrorContains(t, err, "no HASH-USD trades in window")
+	assert.ErrorIs(t, err, ErrNoTrades, "should return ErrNoTrades sentinel so callers can skip cleanly")
 }
 
 // TestWindow verifies a 7-day span ending at Eastern midnight.

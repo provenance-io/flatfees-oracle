@@ -7,12 +7,18 @@ package price
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math/big"
 	"net/http"
 	"time"
 )
+
+// ErrNoTrades is returned by GetPrice when the fetch succeeded but the trailing
+// window contained no trades. Callers should treat it as "no update possible
+// today, try again tomorrow" — not a failure that warrants paging.
+var ErrNoTrades = errors.New("no trades in window")
 
 const (
 	// DefaultBaseURL is the internal Figure Markets HASH-USD trades endpoint.
@@ -92,7 +98,7 @@ func (c *Client) GetPrice(ctx context.Context) (Result, error) {
 		return Result{}, err
 	}
 	if len(matches) == 0 {
-		return Result{}, fmt.Errorf("no HASH-USD trades in window %s..%s",
+		return Result{}, fmt.Errorf("%w %s..%s", ErrNoTrades,
 			start.Format(time.RFC3339), end.Format(time.RFC3339))
 	}
 	vwap, err := VWAP(matches)

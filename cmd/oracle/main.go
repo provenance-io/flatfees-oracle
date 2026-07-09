@@ -57,6 +57,12 @@ func run() error {
 	pc.HTTP.Timeout = cfg.HTTPTimeout
 
 	res, err := pc.GetPrice(ctx)
+	if errors.Is(err, price.ErrNoTrades) {
+		// A genuinely quiet window (common on low-volume testnet days) shouldn't
+		// page anyone; skip today's update and let tomorrow's run catch up.
+		log.Warn("no trades in window; skipping update", "error", err.Error(), "outcome", "skipped")
+		return nil
+	}
 	if err != nil {
 		log.Error("price fetch failed", "error", err.Error(), "outcome", "failed")
 		return err
