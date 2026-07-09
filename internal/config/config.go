@@ -30,6 +30,11 @@ type Config struct {
 	// GRPCEndpoint is the Provenance node gRPC address (host:port).
 	// Environment variable: GRPC_ENDPOINT.
 	GRPCEndpoint string
+	// GRPCInsecure, when true, uses plaintext transport for the Provenance
+	// node gRPC connection. Only appropriate for in-cluster or localhost
+	// endpoints on a trusted network. Default is false (use TLS) if not set.
+	// Environment variable: GRPC_INSECURE.
+	GRPCInsecure bool
 	// ChainID is the target chain id.
 	// Environment variable: CHAIN_ID.
 	ChainID string
@@ -85,6 +90,7 @@ func Load() (Config, error) {
 		LogLevel:         strings.ToLower(getEnv("LOG_LEVEL", "info")),
 		PriceBaseURL:     os.Getenv("PRICE_BASE_URL"),
 		GRPCEndpoint:     os.Getenv("GRPC_ENDPOINT"),
+		GRPCInsecure:     getBool("GRPC_INSECURE", false, et),
 		ChainID:          os.Getenv("CHAIN_ID"),
 		OracleAddress:    os.Getenv("ORACLE_ADDRESS"),
 		PrivateKeyHex:    os.Getenv("PRIVATE_KEY_HEX"),

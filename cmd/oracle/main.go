@@ -6,6 +6,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"os"
 	"time"
@@ -15,6 +16,7 @@ import (
 	_ "time/tzdata"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 
 	"github.com/provenance-io/flatfees-oracle/internal/chain"
@@ -94,9 +96,17 @@ func run() error {
 		return err
 	}
 	// 3. Connect to the node.
-	// NOTE: insecure transport by default — switch to TLS credentials for any
-	// non-local endpoint. Wire credentials per the cluster's conventions.
-	conn, err := grpc.NewClient(cfg.GRPCEndpoint, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	// TLS by default (system root CAs, min TLS 1.2). GRPC_INSECURE=true is an
+	// explicit opt-out for in-cluster / localhost endpoints on a trusted network.
+	var creds credentials.TransportCredentials
+	if cfg.GRPCInsecure {
+		creds = insecure.NewCredentials()
+		log.Warn("using insecure gRPC transport", "endpoint", cfg.GRPCEndpoint)
+	} else {
+		creds = credentials.NewTLS(&tls.Config{MinVersion: tls.VersionTLS12})
+		log.Info("using secure gRPC transport", "endpoint", cfg.GRPCEndpoint)
+	}
+	conn, err := grpc.NewClient(cfg.GRPCEndpoint, grpc.WithTransportCredentials(creds))
 	if err != nil {
 		log.Error("grpc connect failed", "error", err.Error(), "endpoint", cfg.GRPCEndpoint, "outcome", "failed")
 		return err
