@@ -11,6 +11,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // fakeTxSvc implements txtypes.ServiceClient for tests. Only BroadcastTx and
@@ -264,6 +266,46 @@ func TestConfirmRespectsContextCancellation(t *testing.T) {
 	require.Error(t, err)
 	assert.ErrorIs(t, err, context.DeadlineExceeded,
 		"context cancellation must short-circuit the poll loop")
+}
+
+func TestBroadcastRetriesTransientGRPCErrors(t *testing.T) {
+	// Broadcast() config allows 2 attempts total. One transient failure then
+	// success should complete cleanly and NOT double-broadcast on the chain
+	// (BroadcastTx must be called twice — the retry — and no more).
+	var attempts int
+	svc := &fakeTxSvc{
+		broadcastFn: func(_ context.Context, _ *txtypes.BroadcastTxRequest) (*txtypes.BroadcastTxResponse, error) {
+			attempts++
+			if attempts == 1 {
+				return nil, status.Error(codes.Unavailable, "node restarting")
+			}
+			return &txtypes.BroadcastTxResponse{TxResponse: &sdk.TxResponse{Code: 0, TxHash: "H"}}, nil
+		},
+	}
+	b := NewBroadcasterWithClient(svc)
+
+	hash, err := b.Broadcast(context.Background(), []byte("tx"))
+	require.NoError(t, err)
+	assert.Equal(t, "H", hash)
+	assert.Equal(t, 2, attempts, "should retry exactly once on Unavailable")
+}
+
+func TestBroadcastDoesNotRetryCheckTxFailure(t *testing.T) {
+	// CheckTx failure is a chain-level rejection (Code != 0), not a gRPC error.
+	// It must NOT be retried — the tx is already known-bad.
+	svc := &fakeTxSvc{
+		broadcastFn: func(_ context.Context, _ *txtypes.BroadcastTxRequest) (*txtypes.BroadcastTxResponse, error) {
+			return &txtypes.BroadcastTxResponse{
+				TxResponse: &sdk.TxResponse{Code: 11, TxHash: "H", RawLog: "out of gas"},
+			}, nil
+		},
+	}
+	b := NewBroadcasterWithClient(svc)
+
+	hash, err := b.Broadcast(context.Background(), []byte("tx"))
+	require.Error(t, err)
+	assert.Equal(t, "H", hash)
+	assert.Equal(t, 1, svc.broadcastCalls, "CheckTx failure must not trigger a retry")
 }
 
 func TestBroadcastAndConfirmHappyPath(t *testing.T) {

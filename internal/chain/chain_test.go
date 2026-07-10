@@ -10,6 +10,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	flatfeestypes "github.com/provenance-io/provenance/x/flatfees/types"
 
@@ -58,6 +60,74 @@ func TestEstimateTxFees(t *testing.T) {
 	resp, err := r.EstimateTxFees(context.Background(), []byte("tx"), 1.2)
 	require.NoError(t, err, "EstimateTxFees")
 	assert.Equal(t, uint64(123456), resp.EstimatedGas)
+}
+
+// flakeyQC is a QueryClient that returns a transient gRPC error for the first
+// paramFailures / feeFailures calls, then succeeds. Used to verify the retry
+// wrapper actually kicks in at the Reader boundary.
+type flakeyQC struct {
+	paramFailures int
+	feeFailures   int
+	params        flatfeestypes.Params
+	fees          *flatfeestypes.QueryCalculateTxFeesResponse
+	paramCalls    int
+	feeCalls      int
+}
+
+func (f *flakeyQC) Params(_ context.Context, _ *flatfeestypes.QueryParamsRequest, _ ...grpc.CallOption) (*flatfeestypes.QueryParamsResponse, error) {
+	f.paramCalls++
+	if f.paramCalls <= f.paramFailures {
+		return nil, status.Error(codes.Unavailable, "node warming up")
+	}
+	return &flatfeestypes.QueryParamsResponse{Params: f.params}, nil
+}
+
+func (f *flakeyQC) CalculateTxFees(_ context.Context, _ *flatfeestypes.QueryCalculateTxFeesRequest, _ ...grpc.CallOption) (*flatfeestypes.QueryCalculateTxFeesResponse, error) {
+	f.feeCalls++
+	if f.feeCalls <= f.feeFailures {
+		return nil, status.Error(codes.Unavailable, "node warming up")
+	}
+	return f.fees, nil
+}
+
+func TestCurrentParamsRetriesTransientErrors(t *testing.T) {
+	q := &flakeyQC{paramFailures: 2, params: flatfeestypes.Params{OracleAddresses: []string{"pb1x"}}}
+	r := NewReaderWithClient(q)
+
+	got, err := r.CurrentParams(context.Background())
+	require.NoError(t, err, "CurrentParams should recover after transient errors")
+	assert.Equal(t, []string{"pb1x"}, got.OracleAddresses)
+	assert.Equal(t, 3, q.paramCalls, "should retry twice before succeeding")
+}
+
+func TestEstimateTxFeesRetriesTransientErrors(t *testing.T) {
+	q := &flakeyQC{feeFailures: 1, fees: &flatfeestypes.QueryCalculateTxFeesResponse{EstimatedGas: 42}}
+	r := NewReaderWithClient(q)
+
+	resp, err := r.EstimateTxFees(context.Background(), []byte("tx"), 1.5)
+	require.NoError(t, err)
+	assert.Equal(t, uint64(42), resp.EstimatedGas)
+	assert.Equal(t, 2, q.feeCalls, "should retry once before succeeding")
+}
+
+// permanentQC returns a permanent (non-retryable) gRPC error every time.
+type permanentQC struct{ paramCalls int }
+
+func (p *permanentQC) Params(_ context.Context, _ *flatfeestypes.QueryParamsRequest, _ ...grpc.CallOption) (*flatfeestypes.QueryParamsResponse, error) {
+	p.paramCalls++
+	return nil, status.Error(codes.InvalidArgument, "no such module")
+}
+func (p *permanentQC) CalculateTxFees(_ context.Context, _ *flatfeestypes.QueryCalculateTxFeesRequest, _ ...grpc.CallOption) (*flatfeestypes.QueryCalculateTxFeesResponse, error) {
+	return nil, status.Error(codes.InvalidArgument, "no such module")
+}
+
+func TestCurrentParamsDoesNotRetryPermanentErrors(t *testing.T) {
+	q := &permanentQC{}
+	r := NewReaderWithClient(q)
+
+	_, err := r.CurrentParams(context.Background())
+	require.Error(t, err)
+	assert.Equal(t, 1, q.paramCalls, "permanent InvalidArgument must not be retried")
 }
 
 func TestToModuleFactorAndSame(t *testing.T) {

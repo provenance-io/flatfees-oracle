@@ -10,6 +10,8 @@ import (
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	txtypes "github.com/cosmos/cosmos-sdk/types/tx"
+
+	"github.com/provenance-io/flatfees-oracle/internal/retry"
 )
 
 // errNilTxResponse is recorded in lastErr when GetTx returns success with no
@@ -35,11 +37,20 @@ func NewBroadcasterWithClient(svc txtypes.ServiceClient) *Broadcaster {
 	return &Broadcaster{svc: svc, PollInterval: 10 * time.Millisecond, PollTimeout: time.Second}
 }
 
-// Broadcast submits txBytes in SYNC mode and returns the transaction hash or a CheckTx error.
+// Broadcast submits txBytes in SYNC mode and returns the transaction hash or a
+// CheckTx error. Transient gRPC failures are retried per retry.Broadcast(); the
+// signed tx carries its own replay protection (sequence or timeout_timestamp),
+// so a duplicate broadcast is either rejected by the chain or covered by
+// Confirm's polling.
 func (b *Broadcaster) Broadcast(ctx context.Context, txBytes []byte) (string, error) {
-	resp, err := b.svc.BroadcastTx(ctx, &txtypes.BroadcastTxRequest{
-		TxBytes: txBytes,
-		Mode:    txtypes.BroadcastMode_BROADCAST_MODE_SYNC,
+	var resp *txtypes.BroadcastTxResponse
+	err := retry.Do(ctx, retry.Broadcast(), func() error {
+		var callErr error
+		resp, callErr = b.svc.BroadcastTx(ctx, &txtypes.BroadcastTxRequest{
+			TxBytes: txBytes,
+			Mode:    txtypes.BroadcastMode_BROADCAST_MODE_SYNC,
+		})
+		return callErr
 	})
 	if err != nil {
 		return "", fmt.Errorf("broadcast tx: %w", err)

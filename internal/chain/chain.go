@@ -31,6 +31,7 @@ import (
 	flatfeestypes "github.com/provenance-io/provenance/x/flatfees/types"
 
 	"github.com/provenance-io/flatfees-oracle/internal/convert"
+	"github.com/provenance-io/flatfees-oracle/internal/retry"
 )
 
 // QueryClient is the subset of the flatfees query client this package needs.
@@ -58,21 +59,36 @@ func NewReaderWithClient(qc QueryClient) *Reader {
 }
 
 // CurrentParams returns the live flatfees params, including the current
-// conversion factor and the set of authorized oracle addresses.
+// conversion factor and the set of authorized oracle addresses. Retries on
+// transient gRPC errors so a single node blip doesn't fail the daily run.
 func (r *Reader) CurrentParams(ctx context.Context) (flatfeestypes.Params, error) {
-	resp, err := r.qc.Params(ctx, &flatfeestypes.QueryParamsRequest{})
+	var params flatfeestypes.Params
+	err := retry.Do(ctx, retry.Default(), func() error {
+		resp, err := r.qc.Params(ctx, &flatfeestypes.QueryParamsRequest{})
+		if err != nil {
+			return err
+		}
+		params = resp.Params
+		return nil
+	})
 	if err != nil {
 		return flatfeestypes.Params{}, fmt.Errorf("query flatfees params: %w", err)
 	}
-	return resp.Params, nil
+	return params, nil
 }
 
 // EstimateTxFees runs the CalculateTxFees query for an encoded (unsigned) tx,
-// returning the estimated gas and the flat total fee to set on the tx.
+// returning the estimated gas and the flat total fee to set on the tx. Retries
+// on transient gRPC errors.
 func (r *Reader) EstimateTxFees(ctx context.Context, txBytes []byte, gasAdjustment float32) (*flatfeestypes.QueryCalculateTxFeesResponse, error) {
-	resp, err := r.qc.CalculateTxFees(ctx, &flatfeestypes.QueryCalculateTxFeesRequest{
-		TxBytes:       txBytes,
-		GasAdjustment: gasAdjustment,
+	var resp *flatfeestypes.QueryCalculateTxFeesResponse
+	err := retry.Do(ctx, retry.Default(), func() error {
+		var callErr error
+		resp, callErr = r.qc.CalculateTxFees(ctx, &flatfeestypes.QueryCalculateTxFeesRequest{
+			TxBytes:       txBytes,
+			GasAdjustment: gasAdjustment,
+		})
+		return callErr
 	})
 	if err != nil {
 		return nil, fmt.Errorf("calculate tx fees: %w", err)
@@ -137,9 +153,16 @@ func intFromBig(b *big.Int) (math.Int, bool) {
 }
 
 // AccountInfo queries the auth module for an account's number and sequence.
+// Retries on transient gRPC errors; the unpack step is deterministic and not
+// retried.
 func AccountInfo(ctx context.Context, conn grpc1.ClientConn, cdc codec.Codec, addr string) (accNum, sequence uint64, err error) {
 	qc := authtypes.NewQueryClient(conn)
-	resp, err := qc.Account(ctx, &authtypes.QueryAccountRequest{Address: addr})
+	var resp *authtypes.QueryAccountResponse
+	err = retry.Do(ctx, retry.Default(), func() error {
+		var callErr error
+		resp, callErr = qc.Account(ctx, &authtypes.QueryAccountRequest{Address: addr})
+		return callErr
+	})
 	if err != nil {
 		return 0, 0, fmt.Errorf("query account %s: %w", addr, err)
 	}
