@@ -52,22 +52,25 @@ const (
 )
 
 // Broadcaster submits signed transactions and waits for confirmation.
+//
+// The parent context passed to Confirm / BroadcastAndConfirm is the sole
+// authority on how long the poll loop may run. Callers MUST use a context
+// with a deadline (context.WithTimeout / WithDeadline); Confirm has no
+// internal timeout and will loop until the ctx is done or the tx lands.
 type Broadcaster struct {
 	svc          txtypes.ServiceClient
 	PollInterval time.Duration
-	PollTimeout  time.Duration
 }
 
 func NewBroadcaster(conn grpc1.ClientConn) *Broadcaster {
 	return &Broadcaster{
 		svc:          txtypes.NewServiceClient(conn),
 		PollInterval: 2 * time.Second,
-		PollTimeout:  60 * time.Second,
 	}
 }
 
 func NewBroadcasterWithClient(svc txtypes.ServiceClient) *Broadcaster {
-	return &Broadcaster{svc: svc, PollInterval: 10 * time.Millisecond, PollTimeout: time.Second}
+	return &Broadcaster{svc: svc, PollInterval: 10 * time.Millisecond}
 }
 
 // Broadcast submits txBytes in SYNC mode and returns the transaction hash or a
@@ -108,9 +111,17 @@ func isTxAlreadyInMempool(resp *sdk.TxResponse) bool {
 	return resp.Codespace == cosmosSDKCodespace && resp.Code == cosmosCodeTxAlreadyInMempool
 }
 
-// Confirm waits for the transaction to be included and verifies it succeeded.
+// Confirm polls GetTx until the tx is included in a block, a DeliverTx failure
+// is reported, or the context is done.
+//
+// IMPORTANT: ctx MUST have a deadline. Confirm has no internal timeout; called
+// with context.Background() it will loop indefinitely on a lost tx. Every
+// caller in this codebase wraps with context.WithTimeout on entry to the
+// submit phase — new callers must do the same.
+//
+// On ctx cancellation the returned error wraps BOTH ctx.Err() and the last
+// poll error so operators can see what GetTx was reporting when time ran out.
 func (b *Broadcaster) Confirm(ctx context.Context, hash string) (*sdk.TxResponse, error) {
-	deadline := time.Now().Add(b.PollTimeout)
 	var lastErr error
 	for {
 		resp, err := b.svc.GetTx(ctx, &txtypes.GetTxRequest{Hash: hash})
@@ -126,12 +137,10 @@ func (b *Broadcaster) Confirm(ctx context.Context, hash string) (*sdk.TxResponse
 		} else {
 			lastErr = errNilTxResponse
 		}
-		if time.Now().After(deadline) {
-			return nil, fmt.Errorf("tx %s not confirmed within %s: %w", hash, b.PollTimeout, lastErr)
-		}
 		select {
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			return nil, fmt.Errorf("tx %s not confirmed: %w; last poll error: %w",
+				hash, ctx.Err(), lastErr)
 		case <-time.After(b.PollInterval):
 		}
 	}
@@ -150,7 +159,8 @@ func (b *Broadcaster) Confirm(ctx context.Context, hash string) (*sdk.TxResponse
 //     the original error.
 //   - Anything else (ErrCheckTxRejected — insufficient fees, bad signature,
 //     sequence mismatch, etc.) — the tx did NOT enter the mempool. Return
-//     immediately; Confirm would just waste PollTimeout to no purpose.
+//     immediately; Confirm would just spin against the ctx deadline to no
+//     purpose.
 func (b *Broadcaster) BroadcastAndConfirm(ctx context.Context, txBytes []byte) (string, error) {
 	hash, err := b.Broadcast(ctx, txBytes)
 	if err != nil {

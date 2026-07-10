@@ -199,17 +199,20 @@ func TestConfirmTimeoutSurfacesLastError(t *testing.T) {
 		},
 	}
 	b := NewBroadcasterWithClient(svc)
-	b.PollTimeout = 50 * time.Millisecond
 	b.PollInterval = 10 * time.Millisecond
 
-	_, err := b.Confirm(context.Background(), "ABC")
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	_, err := b.Confirm(ctx, "ABC")
 	require.Error(t, err)
-	assert.ErrorContains(t, err, "not confirmed within")
-	assert.ErrorContains(t, err, "tx not found")
+	assert.ErrorContains(t, err, "not confirmed")
+	assert.ErrorIs(t, err, context.DeadlineExceeded)
+	assert.ErrorContains(t, err, "tx not found",
+		"last poll error must appear so operators know what GetTx was reporting")
 }
 
 func TestConfirmNilTxResponseTimesOutReadably(t *testing.T) {
-	// GetTx returns (non-nil, nil) with an empty TxResponse for the whole poll
+	// GetTx returns (non-nil, nil) with an empty TxResponse for the whole
 	// window. Without the errNilTxResponse sentinel the wrapped error would
 	// render "%!w(<nil>)"; assert the readable message instead.
 	svc := &fakeTxSvc{
@@ -218,14 +221,16 @@ func TestConfirmNilTxResponseTimesOutReadably(t *testing.T) {
 		},
 	}
 	b := NewBroadcasterWithClient(svc)
-	b.PollTimeout = 40 * time.Millisecond
 	b.PollInterval = 10 * time.Millisecond
 
-	_, err := b.Confirm(context.Background(), "ABC")
+	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Millisecond)
+	defer cancel()
+	_, err := b.Confirm(ctx, "ABC")
 	require.Error(t, err)
 	assert.ErrorIs(t, err, errNilTxResponse,
 		"nil TxResponse must be recorded as the sentinel, not silently as nil")
-	assert.ErrorContains(t, err, "not confirmed within")
+	assert.ErrorIs(t, err, context.DeadlineExceeded)
+	assert.ErrorContains(t, err, "not confirmed")
 	assert.NotContains(t, err.Error(), "%!w",
 		"formatting must not fall through to %%!w(<nil>)")
 }
@@ -239,11 +244,12 @@ func TestConfirmHandlesNilResponseWithoutPanic(t *testing.T) {
 		},
 	}
 	b := NewBroadcasterWithClient(svc)
-	b.PollTimeout = 40 * time.Millisecond
 	b.PollInterval = 10 * time.Millisecond
 
+	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Millisecond)
+	defer cancel()
 	require.NotPanics(t, func() {
-		_, err := b.Confirm(context.Background(), "ABC")
+		_, err := b.Confirm(ctx, "ABC")
 		require.Error(t, err)
 		assert.ErrorIs(t, err, errNilTxResponse)
 	})
@@ -256,7 +262,6 @@ func TestConfirmRespectsContextCancellation(t *testing.T) {
 		},
 	}
 	b := NewBroadcasterWithClient(svc)
-	b.PollTimeout = 5 * time.Second // deliberately longer than ctx deadline
 	b.PollInterval = 20 * time.Millisecond
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
@@ -265,7 +270,7 @@ func TestConfirmRespectsContextCancellation(t *testing.T) {
 	_, err := b.Confirm(ctx, "ABC")
 	require.Error(t, err)
 	assert.ErrorIs(t, err, context.DeadlineExceeded,
-		"context cancellation must short-circuit the poll loop")
+		"context cancellation must terminate the poll loop")
 }
 
 func TestBroadcastRetriesTransientGRPCErrors(t *testing.T) {
@@ -336,10 +341,11 @@ func TestBroadcastAndConfirmGRPCErrorReturnsOriginalWhenConfirmAlsoFails(t *test
 		},
 	}
 	b := NewBroadcasterWithClient(svc)
-	b.PollTimeout = 30 * time.Millisecond
 	b.PollInterval = 10 * time.Millisecond
 
-	hash, err := b.BroadcastAndConfirm(context.Background(), []byte("tx"))
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+	hash, err := b.BroadcastAndConfirm(ctx, []byte("tx"))
 	require.Error(t, err)
 	assert.Empty(t, hash, "no hash to surface when the wire attempt never got a response and Confirm couldn't find the tx")
 	assert.ErrorIs(t, err, ErrBroadcastRPC, "must return the original broadcast error, not the confirm timeout")
@@ -469,7 +475,7 @@ func TestBroadcastAndConfirmRecoversFromCompleteBroadcastFailure(t *testing.T) {
 func TestBroadcastAndConfirmSkipsConfirmOnRealCheckTxRejection(t *testing.T) {
 	// Real CheckTx rejection ("insufficient fees") — the tx did NOT enter
 	// the mempool. BroadcastAndConfirm must return immediately without
-	// polling GetTx, since Confirm would just waste PollTimeout.
+	// polling GetTx, since Confirm would just spin against the ctx deadline.
 	svc := &fakeTxSvc{
 		broadcastFn: func(_ context.Context, _ *txtypes.BroadcastTxRequest) (*txtypes.BroadcastTxResponse, error) {
 			return &txtypes.BroadcastTxResponse{
@@ -491,5 +497,5 @@ func TestBroadcastAndConfirmSkipsConfirmOnRealCheckTxRejection(t *testing.T) {
 	assert.ErrorIs(t, err, ErrCheckTxRejected,
 		"real rejection must be wrapped with ErrCheckTxRejected")
 	assert.ErrorContains(t, err, "insufficient fees")
-	assert.Equal(t, 0, svc.getTxCalls, "no PollTimeout budget wasted on a rejected tx")
+	assert.Equal(t, 0, svc.getTxCalls, "no ctx budget wasted polling for a rejected tx")
 }
