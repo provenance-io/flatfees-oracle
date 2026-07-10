@@ -95,7 +95,10 @@ type Result struct {
 
 // GetPrice fetches all trades in the trailing window and returns their VWAP.
 func (c *Client) GetPrice(ctx context.Context) (Result, error) {
-	start, end := c.window()
+	start, end, err := c.window()
+	if err != nil {
+		return Result{}, err
+	}
 	matches, err := c.fetchAll(ctx, start, end)
 	if err != nil {
 		return Result{}, err
@@ -142,16 +145,16 @@ func totalVolume(matches []Match) (*big.Rat, error) {
 
 // window returns the [start, end) UTC bounds: the WindowDays ending at midnight
 // Eastern of the current date.
-func (c *Client) window() (time.Time, time.Time) {
-	now := c.Now()
+func (c *Client) window() (time.Time, time.Time, error) {
 	eastern, err := time.LoadLocation("America/New_York")
-	if err == nil {
-		now = now.In(eastern)
+	if err != nil {
+		return time.Time{}, time.Time{}, fmt.Errorf("cannot load timezone America/New_York: %w", err)
 	}
+	now := c.Now().In(eastern)
 	endLocal := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 	endUTC := endLocal.UTC()
 	startUTC := endUTC.AddDate(0, 0, -c.WindowDays)
-	return startUTC, endUTC
+	return startUTC, endUTC, nil
 }
 
 // fetchAll paginates through all trades between start and end. It advances the

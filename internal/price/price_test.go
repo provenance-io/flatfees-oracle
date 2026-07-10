@@ -261,7 +261,8 @@ func TestGetPriceEmptyWindow(t *testing.T) {
 func TestWindow(t *testing.T) {
 	c := New()
 	c.Now = func() time.Time { return time.Date(2026, 6, 16, 12, 0, 0, 0, time.UTC) }
-	start, end := c.window()
+	start, end, err := c.window()
+	require.Nil(t, err, "window err")
 	assert.Equal(t, 7*24*time.Hour, end.Sub(start), "window span")
 	assert.Truef(t, end.After(start), "end %s should be after start %s", end, start)
 }
