@@ -17,8 +17,10 @@ import (
 // A fixed 32-byte test key.
 const testKeyHex = "1111111111111111111111111111111111111111111111111111111111111111"
 
-// init sets the bech32 config once for tests; SetChainConfig seals SDK config and must be called only once.
-func init() { SetChainConfig(true) } // testnet → "tp" prefix
+// init sets the bech32 config for the tx package's tests. seal=false so
+// additional test files can call SetChainConfig* without tripping the SDK
+// config seal.
+func init() { SetChainConfig(true, false) } // testnet → "tp" prefix
 
 func testMsg(authority string) sdk.Msg {
 	return &flatfeestypes.MsgUpdateConversionFactorRequest{

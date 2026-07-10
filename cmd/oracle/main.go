@@ -117,7 +117,7 @@ func run() error {
 	}
 
 	// Set the bech32 prefix from the oracle address (only needed when signing).
-	if err := tx.SetChainConfigFromAddress(cfg.OracleAddress); err != nil {
+	if err := tx.SetChainConfigFromAddress(cfg.OracleAddress, true); err != nil {
 		log.Error("invalid oracle address", "error", err.Error(), "outcome", "failed")
 		return err
 	}
