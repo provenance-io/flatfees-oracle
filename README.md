@@ -67,6 +67,16 @@ internal/logging/   structured JSON logging (slog)
 ¹ Required only when `DRY_RUN` is false. `PRIVATE_KEY_HEX` must be mounted as a
 Kubernetes secret — never bake it into the image.
 
+## Deployment
+
+Kubernetes manifests (CronJob schedule, `concurrencyPolicy`,
+`activeDeadlineSeconds`, resource limits, secret mount for `PRIVATE_KEY_HEX`)
+live in the Argo repo:
+[provenance-io/argo-manifests / apps/flatfees-oracle](https://github.com/provenance-io/argo-manifests/tree/main/apps/flatfees-oracle).
+
+Testnet and mainnet share this image; per-environment values live alongside
+the manifest in that repo.
+
 ## Develop
 
 ```
