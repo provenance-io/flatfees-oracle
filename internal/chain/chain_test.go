@@ -7,7 +7,10 @@ import (
 	"testing"
 
 	"cosmossdk.io/math"
+	"github.com/cosmos/cosmos-sdk/codec"
+	codectypes "github.com/cosmos/cosmos-sdk/codec/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
+	authtypes "github.com/cosmos/cosmos-sdk/x/auth/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
@@ -198,6 +201,106 @@ func TestImpliedPriceRoundTripsThroughCompute(t *testing.T) {
 func TestImpliedPriceReturnsNilForUnsetFactor(t *testing.T) {
 	assert.Nil(t, ImpliedPrice(flatfeestypes.ConversionFactor{}),
 		"ImpliedPrice must return nil on a bootstrap/unset factor so callers can decide what to do")
+}
+
+// fakeAcctQC implements accountQC for AccountInfo tests. It can return a
+// sequence of gRPC errors before returning its configured response, which
+// lets us exercise the retry path deterministically.
+type fakeAcctQC struct {
+	resp                  *authtypes.QueryAccountResponse
+	err                   error
+	failuresBeforeSuccess int
+	calls                 int
+}
+
+func (f *fakeAcctQC) Account(_ context.Context, _ *authtypes.QueryAccountRequest, _ ...grpc.CallOption) (*authtypes.QueryAccountResponse, error) {
+	f.calls++
+	if f.calls <= f.failuresBeforeSuccess {
+		return nil, status.Error(codes.Unavailable, "node warming up")
+	}
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.resp, nil
+}
+
+// newTestCodec builds a codec with the interface registrations needed to
+// pack + unpack BaseAccount responses.
+func newTestCodec(t *testing.T) codec.Codec {
+	t.Helper()
+	registry := codectypes.NewInterfaceRegistry()
+	authtypes.RegisterInterfaces(registry)
+	return codec.NewProtoCodec(registry)
+}
+
+// packAccount builds a QueryAccountResponse carrying an Any-wrapped
+// BaseAccount with the given number and sequence.
+func packAccount(t *testing.T, accNum, seq uint64) *authtypes.QueryAccountResponse {
+	t.Helper()
+	baseAcc := &authtypes.BaseAccount{
+		Address:       "pb1testaccount",
+		AccountNumber: accNum,
+		Sequence:      seq,
+	}
+	anyAcc, err := codectypes.NewAnyWithValue(baseAcc)
+	require.NoError(t, err, "pack BaseAccount into Any")
+	return &authtypes.QueryAccountResponse{Account: anyAcc}
+}
+
+func TestAccountInfoSuccess(t *testing.T) {
+	qc := &fakeAcctQC{resp: packAccount(t, 7, 42)}
+
+	accNum, seq, err := accountInfoFromQC(context.Background(), qc, newTestCodec(t), "pb1testaccount")
+	require.NoError(t, err)
+	assert.Equal(t, uint64(7), accNum, "account number")
+	assert.Equal(t, uint64(42), seq, "sequence")
+	assert.Equal(t, 1, qc.calls, "happy path must query exactly once")
+}
+
+func TestAccountInfoRetriesTransientErrors(t *testing.T) {
+	qc := &fakeAcctQC{
+		resp:                  packAccount(t, 9, 100),
+		failuresBeforeSuccess: 2,
+	}
+
+	accNum, seq, err := accountInfoFromQC(context.Background(), qc, newTestCodec(t), "pb1testaccount")
+	require.NoError(t, err, "must recover after transient failures")
+	assert.Equal(t, uint64(9), accNum)
+	assert.Equal(t, uint64(100), seq)
+	assert.Equal(t, 3, qc.calls, "should retry twice before succeeding")
+}
+
+func TestAccountInfoDoesNotRetryPermanentErrors(t *testing.T) {
+	qc := &fakeAcctQC{err: status.Error(codes.NotFound, "no such account")}
+
+	_, _, err := accountInfoFromQC(context.Background(), qc, newTestCodec(t), "pb1missing")
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "query account pb1missing")
+	assert.ErrorContains(t, err, "no such account")
+	assert.Equal(t, 1, qc.calls, "NotFound is permanent — must not retry")
+}
+
+func TestAccountInfoExhaustsRetriesAndWraps(t *testing.T) {
+	// All attempts fail with a transient error → retry helper exhausts and
+	// AccountInfo wraps with "query account <addr>".
+	qc := &fakeAcctQC{err: status.Error(codes.Unavailable, "still down")}
+
+	_, _, err := accountInfoFromQC(context.Background(), qc, newTestCodec(t), "pb1down")
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "query account pb1down")
+	assert.ErrorContains(t, err, "still down")
+	assert.Equal(t, 3, qc.calls, "default retry config allows three attempts")
+}
+
+func TestAccountInfoUnpackFailure(t *testing.T) {
+	// Response with a nil Account payload — the unpack step must fail with
+	// "unpack account <addr>" (and NOT retry, since it's a codec problem).
+	qc := &fakeAcctQC{resp: &authtypes.QueryAccountResponse{Account: nil}}
+
+	_, _, err := accountInfoFromQC(context.Background(), qc, newTestCodec(t), "pb1testaccount")
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "unpack account pb1testaccount")
+	assert.Equal(t, 1, qc.calls, "unpack errors don't trigger a retry")
 }
 
 func TestToModuleFactorAndSame(t *testing.T) {

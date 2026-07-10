@@ -185,13 +185,26 @@ func intFromBig(b *big.Int) (math.Int, bool) {
 	return math.NewIntFromBigInt(b), true
 }
 
+// accountQC is the narrow subset of authtypes.QueryClient AccountInfo needs.
+// Extracted so tests can inject a fake without implementing the full auth
+// query surface. authtypes.QueryClient satisfies it structurally.
+type accountQC interface {
+	Account(ctx context.Context, in *authtypes.QueryAccountRequest, opts ...grpc.CallOption) (*authtypes.QueryAccountResponse, error)
+}
+
 // AccountInfo queries the auth module for an account's number and sequence.
 // Retries on transient gRPC errors; the unpack step is deterministic and not
 // retried.
 func AccountInfo(ctx context.Context, conn grpc1.ClientConn, cdc codec.Codec, addr string) (accNum, sequence uint64, err error) {
-	qc := authtypes.NewQueryClient(conn)
+	return accountInfoFromQC(ctx, authtypes.NewQueryClient(conn), cdc, addr)
+}
+
+// accountInfoFromQC is the testable core of AccountInfo. Kept unexported so
+// callers pin against the gRPC ClientConn wrapper; tests exercise this
+// directly with a fake accountQC.
+func accountInfoFromQC(ctx context.Context, qc accountQC, cdc codec.Codec, addr string) (uint64, uint64, error) {
 	var resp *authtypes.QueryAccountResponse
-	err = retry.Do(ctx, retry.Default(), func() error {
+	err := retry.Do(ctx, retry.Default(), func() error {
 		var callErr error
 		resp, callErr = qc.Account(ctx, &authtypes.QueryAccountRequest{Address: addr})
 		return callErr
