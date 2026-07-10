@@ -83,6 +83,9 @@ type Result struct {
 	// PriceUSDPerHASH is the volume-weighted average price (USD per HASH) as an
 	// exact rational.
 	PriceUSDPerHASH *big.Rat
+	// VolumeHASH is the total quantity traded across the window (HASH). Used
+	// by liquidity guards to refuse thin-book updates.
+	VolumeHASH *big.Rat
 	// Trades is the number of trades aggregated.
 	Trades int
 	// WindowStart and WindowEnd bound the trades considered (UTC).
@@ -105,12 +108,36 @@ func (c *Client) GetPrice(ctx context.Context) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
+	volume, err := totalVolume(matches)
+	if err != nil {
+		return Result{}, err
+	}
 	return Result{
 		PriceUSDPerHASH: vwap,
+		VolumeHASH:      volume,
 		Trades:          len(matches),
 		WindowStart:     start,
 		WindowEnd:       end,
 	}, nil
+}
+
+// totalVolume sums the (positive) quantities across all trades. Trades with
+// non-positive or unparseable quantities are excluded — matching VWAP's
+// treatment — so the reported volume corresponds to the trades that actually
+// participated in the average.
+func totalVolume(matches []Match) (*big.Rat, error) {
+	total := new(big.Rat)
+	for i, m := range matches {
+		q, ok := new(big.Rat).SetString(string(m.Quantity))
+		if !ok {
+			return nil, fmt.Errorf("trade %d: invalid quantity %q", i, m.Quantity)
+		}
+		if q.Sign() <= 0 {
+			continue
+		}
+		total.Add(total, q)
+	}
+	return total, nil
 }
 
 // window returns the [start, end) UTC bounds: the WindowDays ending at midnight

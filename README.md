@@ -43,22 +43,26 @@ internal/logging/   structured JSON logging (slog)
 
 ## Configuration (environment)
 
-| Var                 | Required | Default            | Notes                                                                                                |
-|---------------------|----------|--------------------|------------------------------------------------------------------------------------------------------|
-| `ORACLE_ENV`        | no       | `unknown`          | label for logs, e.g. `testnet`/`mainnet`                                                             |
-| `LOG_LEVEL`         | no       | `info`             | debug, info, warn, or error                                                                          |
-| `GRPC_ENDPOINT`     | yes¹     | –                  | Provenance node gRPC `host:port`                                                                     |
-| `GRPC_INSECURE`     | no       | `false`            | plaintext gRPC transport; only for in-cluster / localhost endpoints on a trusted network             |
-| `CHAIN_ID`          | yes¹     | –                  | target chain id                                                                                      |
-| `ORACLE_ADDRESS`    | yes¹     | –                  | bech32 signer; must be in x/flatfees params `oracle_addresses` list                                  |
-| `PRIVATE_KEY_HEX`   | yes¹     | –                  | hex-encoded secp256k1 private key for signing; must derive to `ORACLE_ADDRESS`                       |
-| `GAS_ADJUSTMENT`    | no       | `1.5`              | multiplier on simulated gas                                                                          |
-| `UNORDERED`         | no       | `true`             | submit as an unordered tx (timeout-based replay protection) rather than by account sequence          |
-| `UNORDERED_TIMEOUT` | no       | `2m`               | timeout for unordered txs; must be ≤ chain max of `5m`. Ignored when `UNORDERED=false`               |
-| `ACCOUNT_NUMBER`    | no       | `0`                | when non-zero, used when signing unordered txs instead of querying the chain. `0` means "look it up" |
-| `PRICE_BASE_URL`    | no       | Figure Markets URL | override price endpoint                                                                              |
-| `HTTP_TIMEOUT`      | no       | `15s`              | price request timeout                                                                                |
-| `DRY_RUN`           | no       | `false`            | compute + log, never broadcast                                                                       |
+| Var                    | Required | Default            | Notes                                                                                                |
+|------------------------|----------|--------------------|------------------------------------------------------------------------------------------------------|
+| `ORACLE_ENV`           | no       | `unknown`          | label for logs, e.g. `testnet`/`mainnet`                                                             |
+| `LOG_LEVEL`            | no       | `info`             | debug, info, warn, or error                                                                          |
+| `GRPC_ENDPOINT`        | yes¹     | –                  | Provenance node gRPC `host:port`                                                                     |
+| `GRPC_INSECURE`        | no       | `false`            | plaintext gRPC transport; only for in-cluster / localhost endpoints on a trusted network             |
+| `CHAIN_ID`             | yes¹     | –                  | target chain id                                                                                      |
+| `ORACLE_ADDRESS`       | yes¹     | –                  | bech32 signer; must be in x/flatfees params `oracle_addresses` list                                  |
+| `PRIVATE_KEY_HEX`      | yes¹     | –                  | hex-encoded secp256k1 private key for signing; must derive to `ORACLE_ADDRESS`                       |
+| `GAS_ADJUSTMENT`       | no       | `1.5`              | multiplier on simulated gas                                                                          |
+| `UNORDERED`            | no       | `true`             | submit as an unordered tx (timeout-based replay protection) rather than by account sequence          |
+| `UNORDERED_TIMEOUT`    | no       | `2m`               | timeout for unordered txs; must be ≤ chain max of `5m`. Ignored when `UNORDERED=false`               |
+| `ACCOUNT_NUMBER`       | no       | `0`                | when non-zero, used when signing unordered txs instead of querying the chain. `0` means "look it up" |
+| `PRICE_BASE_URL`       | no       | Figure Markets URL | override price endpoint                                                                              |
+| `HTTP_TIMEOUT`         | no       | `15s`              | price request timeout                                                                                |
+| `MAX_PRICE_MOVE_RATIO` | no       | `10`               | refuse to submit if new price > N× or < 1/N× the on-chain price. `≤ 1` disables the check            |
+| `MIN_TRADES`           | no       | `10`               | refuse to submit unless the window has at least this many trades                                     |
+| `MIN_VOLUME_HASH`      | no       | `100`              | refuse to submit unless total HASH volume in the window meets this floor. `0` disables the check     |
+| `FORCE_UPDATE`         | no       | `false`            | operator escape hatch — bypasses movement and liquidity guards for one run                           |
+| `DRY_RUN`              | no       | `false`            | compute + log, never broadcast                                                                       |
 
 ¹ Required only when `DRY_RUN` is false. `PRIVATE_KEY_HEX` must be mounted as a
 Kubernetes secret — never bake it into the image.

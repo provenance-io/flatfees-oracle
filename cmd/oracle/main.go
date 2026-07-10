@@ -22,6 +22,7 @@ import (
 	"github.com/provenance-io/flatfees-oracle/internal/chain"
 	"github.com/provenance-io/flatfees-oracle/internal/config"
 	"github.com/provenance-io/flatfees-oracle/internal/convert"
+	"github.com/provenance-io/flatfees-oracle/internal/guard"
 	"github.com/provenance-io/flatfees-oracle/internal/logging"
 	"github.com/provenance-io/flatfees-oracle/internal/price"
 	"github.com/provenance-io/flatfees-oracle/internal/tx"
@@ -70,9 +71,28 @@ func run() error {
 	log.Info("price fetched",
 		"price_usd_per_hash", res.PriceUSDPerHASH.FloatString(12),
 		"trades", res.Trades,
+		"volume_hash", res.VolumeHASH.FloatString(6),
 		"window_start", res.WindowStart.Format(time.RFC3339),
 		"window_end", res.WindowEnd.Format(time.RFC3339),
 	)
+
+	if cfg.ForceUpdate {
+		log.Warn("FORCE_UPDATE set; movement and liquidity guards bypassed for this run")
+	}
+
+	// Liquidity guard — runs pre-chain so it can short-circuit a thin-book
+	// day without paying the RPC round-trip. Bypassable via FORCE_UPDATE.
+	if !cfg.ForceUpdate {
+		if err := guard.CheckLiquidity(res.Trades, res.VolumeHASH, cfg.MinTrades, cfg.MinVolumeHASH); err != nil {
+			log.Warn("insufficient liquidity; skipping update",
+				"error", err.Error(),
+				"trades", res.Trades,
+				"volume_hash", res.VolumeHASH.FloatString(6),
+				"outcome", "skipped",
+			)
+			return nil
+		}
+	}
 
 	// 2. Compute the conversion factor.
 	cf, err := convert.Compute(res.PriceUSDPerHASH)
@@ -133,6 +153,27 @@ func run() error {
 	if chain.SameFactor(params.ConversionFactor, modFactor) {
 		log.Info("conversion factor unchanged; skipping submit", "outcome", "skipped")
 		return nil
+	}
+
+	// Movement guard — refuse to submit if the new price is outside the
+	// symmetric multiplicative band around the on-chain price. Skipped when
+	// the on-chain factor is unset (bootstrap) or when FORCE_UPDATE is on.
+	if !cfg.ForceUpdate {
+		onChainPrice := chain.ImpliedPrice(params.ConversionFactor)
+		if err := guard.CheckMovement(res.PriceUSDPerHASH, onChainPrice, cfg.MaxPriceMoveRatio); err != nil {
+			onChainStr := "<unset>"
+			if onChainPrice != nil {
+				onChainStr = onChainPrice.FloatString(12)
+			}
+			log.Warn("price movement exceeds band; skipping update",
+				"error", err.Error(),
+				"new_price", res.PriceUSDPerHASH.FloatString(12),
+				"on_chain_price", onChainStr,
+				"max_ratio", cfg.MaxPriceMoveRatio,
+				"outcome", "skipped",
+			)
+			return nil
+		}
 	}
 
 	cdc, txConfig, err := tx.NewEncoding()

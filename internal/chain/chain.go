@@ -144,6 +144,39 @@ func IsAuthorizedOracle(params flatfeestypes.Params, addr string) bool {
 	return false
 }
 
+// IsFactorSet reports whether the on-chain factor has real amounts on both
+// sides. Fresh chains / bootstrap runs may present an all-zero factor; the
+// sanity-band check must skip when there's nothing meaningful to compare
+// against.
+func IsFactorSet(f flatfeestypes.ConversionFactor) bool {
+	return !f.DefinitionAmount.Amount.IsNil() && !f.DefinitionAmount.Amount.IsZero() &&
+		!f.ConvertedAmount.Amount.IsNil() && !f.ConvertedAmount.Amount.IsZero()
+}
+
+// ImpliedPrice recovers the USD-per-HASH price implied by a flatfees factor.
+//
+// From the module convention:
+//
+//	converted_amount / definition_amount = 1e6 / P
+//
+// where converted_amount is in nhash and definition_amount is in musd.
+// Rearranging:
+//
+//	P = definition_amount * 1e6 / converted_amount
+//
+// Returns nil for a zero/unset factor (bootstrap case — caller should check
+// IsFactorSet first if that matters).
+func ImpliedPrice(f flatfeestypes.ConversionFactor) *big.Rat {
+	if !IsFactorSet(f) {
+		return nil
+	}
+	def := new(big.Rat).SetInt(f.DefinitionAmount.Amount.BigInt())
+	conv := new(big.Rat).SetInt(f.ConvertedAmount.Amount.BigInt())
+	// P = def * 1e6 / conv
+	p := new(big.Rat).Mul(def, new(big.Rat).SetInt64(1_000_000))
+	return p.Quo(p, conv)
+}
+
 // intFromBig converts a *big.Int to cosmossdk.io/math.Int, rejecting nil/negative.
 func intFromBig(b *big.Int) (math.Int, bool) {
 	if b == nil || b.Sign() < 0 {

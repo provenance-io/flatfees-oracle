@@ -81,6 +81,9 @@ func TestGetPricePaginates(t *testing.T) {
 	// VWAP = (0.05*10 + 0.05*10 + 0.07*20)/40 = 2.4/40 = 0.06
 	assert.Zerof(t, res.PriceUSDPerHASH.Cmp(big.NewRat(6, 100)),
 		"VWAP = %s, want 0.06", res.PriceUSDPerHASH.FloatString(6))
+	// Total volume = 10 + 10 + 20 = 40 HASH
+	assert.Zerof(t, res.VolumeHASH.Cmp(big.NewRat(40, 1)),
+		"VolumeHASH = %s, want 40", res.VolumeHASH.FloatString(6))
 }
 
 // TestGetPriceDedupesPageOverlap: the server returns the last trade of page 1

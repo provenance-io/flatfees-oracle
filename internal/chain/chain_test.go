@@ -6,6 +6,7 @@ import (
 	"math/big"
 	"testing"
 
+	"cosmossdk.io/math"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -128,6 +129,75 @@ func TestCurrentParamsDoesNotRetryPermanentErrors(t *testing.T) {
 	_, err := r.CurrentParams(context.Background())
 	require.Error(t, err)
 	assert.Equal(t, 1, q.paramCalls, "permanent InvalidArgument must not be retried")
+}
+
+func TestIsFactorSet(t *testing.T) {
+	nonZero := flatfeestypes.ConversionFactor{
+		DefinitionAmount: sdk.NewCoin("musd", math.NewInt(50)),
+		ConvertedAmount:  sdk.NewCoin("nhash", math.NewInt(1_000_000_000)),
+	}
+	assert.True(t, IsFactorSet(nonZero), "non-zero factor must be considered set")
+
+	zeroDef := flatfeestypes.ConversionFactor{
+		DefinitionAmount: sdk.NewCoin("musd", math.ZeroInt()),
+		ConvertedAmount:  sdk.NewCoin("nhash", math.NewInt(1_000_000_000)),
+	}
+	assert.False(t, IsFactorSet(zeroDef), "zero definition must not be considered set")
+
+	zeroConv := flatfeestypes.ConversionFactor{
+		DefinitionAmount: sdk.NewCoin("musd", math.NewInt(50)),
+		ConvertedAmount:  sdk.NewCoin("nhash", math.ZeroInt()),
+	}
+	assert.False(t, IsFactorSet(zeroConv), "zero converted must not be considered set")
+
+	assert.False(t, IsFactorSet(flatfeestypes.ConversionFactor{}),
+		"empty (bootstrap) factor must not be considered set")
+}
+
+func TestImpliedPrice(t *testing.T) {
+	// def=50 musd, conv=1e9 nhash → P = 50 * 1e6 / 1e9 = 0.05 USD/HASH
+	f := flatfeestypes.ConversionFactor{
+		DefinitionAmount: sdk.NewCoin("musd", math.NewInt(50)),
+		ConvertedAmount:  sdk.NewCoin("nhash", math.NewInt(1_000_000_000)),
+	}
+	p := ImpliedPrice(f)
+	require.NotNil(t, p)
+	want := big.NewRat(5, 100)
+	assert.Zerof(t, p.Cmp(want), "ImpliedPrice = %s, want 0.05", p.FloatString(6))
+}
+
+func TestImpliedPriceRoundTripsThroughCompute(t *testing.T) {
+	// Every price in the convert package's tier examples must round-trip:
+	//   Compute(P) → ToModuleFactor → ImpliedPrice ≈ P (within rounding budget)
+	for _, price := range []string{"1", "0.05", "0.01", "0.009", "0.005", "0.00001", "0.000005"} {
+		t.Run(price, func(t *testing.T) {
+			r, ok := new(big.Rat).SetString(price)
+			require.True(t, ok)
+
+			cf, err := convert.Compute(r)
+			require.NoError(t, err)
+			mf, err := ToModuleFactor(cf)
+			require.NoError(t, err)
+
+			implied := ImpliedPrice(mf)
+			require.NotNil(t, implied)
+
+			// definition_amount is rounded to the nearest integer musd, so the
+			// implied price can differ from P by at most 0.5 musd worth of value.
+			// That means |implied - P| / P <= 0.5 * 1e-6 / P * (1e9 / conv).
+			// The tests below only need the diff to be tiny — 1% is huge slack.
+			diff := new(big.Rat).Sub(implied, r)
+			diff.Abs(diff)
+			relBound := new(big.Rat).Mul(r, big.NewRat(1, 100)) // 1% of P
+			assert.LessOrEqualf(t, diff.Cmp(relBound), 0,
+				"implied %s differs from P=%s by more than 1%%", implied.FloatString(12), price)
+		})
+	}
+}
+
+func TestImpliedPriceReturnsNilForUnsetFactor(t *testing.T) {
+	assert.Nil(t, ImpliedPrice(flatfeestypes.ConversionFactor{}),
+		"ImpliedPrice must return nil on a bootstrap/unset factor so callers can decide what to do")
 }
 
 func TestToModuleFactorAndSame(t *testing.T) {

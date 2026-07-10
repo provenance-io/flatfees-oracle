@@ -79,6 +79,30 @@ type Config struct {
 	// Environment variable: ACCOUNT_NUMBER.
 	// Default is 0 (zero) if not set.
 	AccountNumber uint64
+
+	// MaxPriceMoveRatio is the maximum multiplicative move (in either
+	// direction) allowed between the computed price and the price implied by
+	// the on-chain factor. If the new price is > N× or < 1/N× the on-chain
+	// price, the update is refused. Values <= 1 disable the check.
+	// Environment variable: MAX_PRICE_MOVE_RATIO. Default 10.
+	MaxPriceMoveRatio float32
+
+	// MinTrades is the minimum number of trades that must appear in the price
+	// window before the oracle is willing to submit an update.
+	// Environment variable: MIN_TRADES. Default 10.
+	MinTrades int
+
+	// MinVolumeHASH is the minimum total HASH volume required in the price
+	// window before submitting. Expressed in whole HASH (not nhash).
+	// Environment variable: MIN_VOLUME_HASH. Default 100.
+	MinVolumeHASH float64
+
+	// ForceUpdate, when true, bypasses the movement and liquidity guards for
+	// this run. Intended as an operator escape hatch when the guards would
+	// otherwise persistently block a legitimate move (e.g. after a real
+	// large price swing). Never leave this set as a steady-state default.
+	// Environment variable: FORCE_UPDATE. Default false.
+	ForceUpdate bool
 }
 
 // Load reads configuration from environment variables, applying defaults and
@@ -86,20 +110,24 @@ type Config struct {
 func Load() (Config, error) {
 	et := &errorTracker{}
 	c := Config{
-		Env:              getEnv("ORACLE_ENV", "unknown"),
-		LogLevel:         strings.ToLower(getEnv("LOG_LEVEL", "info")),
-		PriceBaseURL:     os.Getenv("PRICE_BASE_URL"),
-		GRPCEndpoint:     os.Getenv("GRPC_ENDPOINT"),
-		GRPCInsecure:     getBool("GRPC_INSECURE", false, et),
-		ChainID:          os.Getenv("CHAIN_ID"),
-		OracleAddress:    os.Getenv("ORACLE_ADDRESS"),
-		PrivateKeyHex:    os.Getenv("PRIVATE_KEY_HEX"),
-		GasAdjustment:    getFloat32("GAS_ADJUSTMENT", 1.5, et),
-		DryRun:           getBool("DRY_RUN", false, et),
-		HTTPTimeout:      getDuration("HTTP_TIMEOUT", 15*time.Second, et),
-		Unordered:        getBool("UNORDERED", true, et),
-		UnorderedTimeout: getDuration("UNORDERED_TIMEOUT", 2*time.Minute, et),
-		AccountNumber:    getUint64("ACCOUNT_NUMBER", 0, et),
+		Env:               getEnv("ORACLE_ENV", "unknown"),
+		LogLevel:          strings.ToLower(getEnv("LOG_LEVEL", "info")),
+		PriceBaseURL:      os.Getenv("PRICE_BASE_URL"),
+		GRPCEndpoint:      os.Getenv("GRPC_ENDPOINT"),
+		GRPCInsecure:      getBool("GRPC_INSECURE", false, et),
+		ChainID:           os.Getenv("CHAIN_ID"),
+		OracleAddress:     os.Getenv("ORACLE_ADDRESS"),
+		PrivateKeyHex:     os.Getenv("PRIVATE_KEY_HEX"),
+		GasAdjustment:     getFloat32("GAS_ADJUSTMENT", 1.5, et),
+		DryRun:            getBool("DRY_RUN", false, et),
+		HTTPTimeout:       getDuration("HTTP_TIMEOUT", 15*time.Second, et),
+		Unordered:         getBool("UNORDERED", true, et),
+		UnorderedTimeout:  getDuration("UNORDERED_TIMEOUT", 2*time.Minute, et),
+		AccountNumber:     getUint64("ACCOUNT_NUMBER", 0, et),
+		MaxPriceMoveRatio: getFloat32("MAX_PRICE_MOVE_RATIO", 10, et),
+		MinTrades:         getInt("MIN_TRADES", 10, et),
+		MinVolumeHASH:     getFloat64("MIN_VOLUME_HASH", 100, et),
+		ForceUpdate:       getBool("FORCE_UPDATE", false, et),
 	}
 
 	if et.HasError() {
@@ -219,6 +247,38 @@ func getUint64(key string, def uint64, et *errorTracker) uint64 {
 	rv, err := strconv.ParseUint(v, 10, 64)
 	if err != nil {
 		et.Append(fmt.Errorf("invalid %s uint64 %q: %w", key, v, err))
+		return def
+	}
+	return rv
+}
+
+// getInt looks up the env var with the provided key and converts it to an int.
+// Returns def if the env var isn't set or if there's a problem parsing it.
+// If there's a problem parsing it, an error is added to the provided errorTracker.
+func getInt(key string, def int, et *errorTracker) int {
+	v := os.Getenv(key)
+	if v == "" {
+		return def
+	}
+	rv, err := strconv.Atoi(v)
+	if err != nil {
+		et.Append(fmt.Errorf("invalid %s int %q: %w", key, v, err))
+		return def
+	}
+	return rv
+}
+
+// getFloat64 looks up the env var with the provided key and converts it to a float64.
+// Returns def if the env var isn't set or if there's a problem parsing it.
+// If there's a problem parsing it, an error is added to the provided errorTracker.
+func getFloat64(key string, def float64, et *errorTracker) float64 {
+	v := os.Getenv(key)
+	if v == "" {
+		return def
+	}
+	rv, err := strconv.ParseFloat(v, 64)
+	if err != nil {
+		et.Append(fmt.Errorf("invalid %s float %q: %w", key, v, err))
 		return def
 	}
 	return rv
