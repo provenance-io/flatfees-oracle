@@ -6,6 +6,7 @@ import (
 	"math/big"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -255,6 +256,35 @@ func TestGetPriceEmptyWindow(t *testing.T) {
 
 	_, err := c.GetPrice(context.Background())
 	assert.ErrorIs(t, err, ErrNoTrades, "should return ErrNoTrades sentinel so callers can skip cleanly")
+}
+
+// TestGetPriceRejectsOversizedResponse: the response body exceeds
+// MaxResponseBytes. The decode must fail (not OOM) and the error should be
+// treated as non-retryable, so GetPrice surfaces it once.
+func TestGetPriceRejectsOversizedResponse(t *testing.T) {
+	// Serve a body larger than MaxResponseBytes. Padding with a JSON-safe
+	// filler in "denom" ensures the decoder actually pulls the bytes.
+	oversized := `{"denom":"` + strings.Repeat("x", 2048) + `","matches":[]}`
+
+	var calls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		_, _ = w.Write([]byte(oversized))
+	}))
+	defer srv.Close()
+
+	c := New()
+	c.BaseURL = srv.URL
+	c.MaxRetries = 3           // deliberately > 0 to prove no retry on oversize
+	c.MaxResponseBytes = 1024  // < oversized body
+	c.RetryWait = time.Millisecond
+	c.Now = func() time.Time { return time.Date(2026, 6, 16, 12, 0, 0, 0, time.UTC) }
+
+	_, err := c.GetPrice(context.Background())
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "decode response",
+		"MaxBytesReader failure must surface through the decode error path")
+	assert.Equal(t, 1, calls, "oversized response is not retryable — must not retry")
 }
 
 // TestWindow verifies a 7-day span ending at Eastern midnight.

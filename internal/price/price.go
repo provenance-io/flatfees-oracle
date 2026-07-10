@@ -28,6 +28,10 @@ const (
 	defaultPageSize = 200
 	// windowDays is the trailing window (ending midnight Eastern) to aggregate.
 	windowDays = 7
+	// maxResponseBytes caps a single price-page response body. 200 trades at
+	// ~500 bytes each is ~100 KiB; 32 MiB gives 300× headroom without letting
+	// a runaway upstream OOM the pod.
+	maxResponseBytes = 32 << 20 // 32 MiB
 	// timeFormat is the nanosecond timestamp format used by the API.
 	timeFormat = "2006-01-02T15:04:05.000000000Z"
 )
@@ -55,12 +59,13 @@ type response struct {
 // Client fetches and aggregates HASH-USD trades. The zero value is not usable;
 // construct one with New.
 type Client struct {
-	BaseURL    string
-	HTTP       *http.Client
-	PageSize   int
-	WindowDays int
-	MaxRetries int           // additional attempts on transient failures
-	RetryWait  time.Duration // base backoff between retries
+	BaseURL          string
+	HTTP             *http.Client
+	PageSize         int
+	WindowDays       int
+	MaxRetries       int           // additional attempts on transient failures
+	RetryWait        time.Duration // base backoff between retries
+	MaxResponseBytes int64         // cap on a single price-page response body
 	// Now allows tests to pin the window. Defaults to time.Now.
 	Now func() time.Time
 }
@@ -68,13 +73,14 @@ type Client struct {
 // New returns a Client with sensible defaults.
 func New() *Client {
 	return &Client{
-		BaseURL:    DefaultBaseURL,
-		HTTP:       &http.Client{Timeout: 15 * time.Second},
-		PageSize:   defaultPageSize,
-		WindowDays: windowDays,
-		MaxRetries: 3,
-		RetryWait:  500 * time.Millisecond,
-		Now:        time.Now,
+		BaseURL:          DefaultBaseURL,
+		HTTP:             &http.Client{Timeout: 15 * time.Second},
+		PageSize:         defaultPageSize,
+		WindowDays:       windowDays,
+		MaxRetries:       3,
+		RetryWait:        500 * time.Millisecond,
+		MaxResponseBytes: maxResponseBytes,
+		Now:              time.Now,
 	}
 }
 
@@ -272,8 +278,11 @@ func (c *Client) doFetch(ctx context.Context, url string) (matches []Match, retr
 		return nil, retry, fmt.Errorf("unexpected status %d from %s: %s", resp.StatusCode, url, body)
 	}
 
+	// Cap the body so a runaway upstream can't OOM the pod. json.Decoder
+	// streams as it reads, so this bounds allocation too.
+	body := http.MaxBytesReader(nil, resp.Body, c.MaxResponseBytes)
 	var r response
-	if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
+	if err := json.NewDecoder(body).Decode(&r); err != nil {
 		return nil, false, fmt.Errorf("decode response from %s: %w", url, err)
 	}
 	return r.Matches, false, nil
