@@ -47,8 +47,8 @@ var (
 // ErrTxInMempoolCache = errorsmod.Register(RootCodespace, 19, "tx already in mempool").
 // Hardcoded here rather than importing sdkerrors to keep the surface small.
 const (
-	cosmosSDKCodespace              = "sdk"
-	cosmosCodeTxAlreadyInMempool    = uint32(19)
+	cosmosSDKCodespace           = "sdk"
+	cosmosCodeTxAlreadyInMempool = uint32(19)
 )
 
 // Broadcaster submits signed transactions and waits for confirmation.
