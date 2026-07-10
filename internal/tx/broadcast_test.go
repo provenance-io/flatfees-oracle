@@ -322,22 +322,29 @@ func TestBroadcastAndConfirmHappyPath(t *testing.T) {
 	assert.Equal(t, 1, svc.getTxCalls)
 }
 
-func TestBroadcastAndConfirmBroadcastErrorStopsShort(t *testing.T) {
+func TestBroadcastAndConfirmGRPCErrorReturnsOriginalWhenConfirmAlsoFails(t *testing.T) {
+	// gRPC failure means the tx MIGHT be in the mempool (lost-ack) — the new
+	// belt-and-suspenders path polls Confirm on the computed hash. If Confirm
+	// also can't find the tx, we return the ORIGINAL broadcast error so the
+	// operator sees why the wire attempt failed, not just "not confirmed".
 	svc := &fakeTxSvc{
 		broadcastFn: func(_ context.Context, _ *txtypes.BroadcastTxRequest) (*txtypes.BroadcastTxResponse, error) {
-			return nil, errors.New("rpc down")
+			return nil, errors.New("connection refused") // non-retryable, non-gRPC
 		},
 		getTxFn: func(_ context.Context, _ *txtypes.GetTxRequest) (*txtypes.GetTxResponse, error) {
-			t.Fatal("GetTx must not be called when Broadcast fails")
-			return nil, nil
+			return nil, errors.New("tx not found")
 		},
 	}
 	b := NewBroadcasterWithClient(svc)
+	b.PollTimeout = 30 * time.Millisecond
+	b.PollInterval = 10 * time.Millisecond
 
-	_, err := b.BroadcastAndConfirm(context.Background(), []byte("tx"))
+	hash, err := b.BroadcastAndConfirm(context.Background(), []byte("tx"))
 	require.Error(t, err)
-	assert.Equal(t, 1, svc.broadcastCalls)
-	assert.Equal(t, 0, svc.getTxCalls)
+	assert.Empty(t, hash, "no hash to surface when the wire attempt never got a response and Confirm couldn't find the tx")
+	assert.ErrorIs(t, err, ErrBroadcastRPC, "must return the original broadcast error, not the confirm timeout")
+	assert.ErrorContains(t, err, "connection refused")
+	assert.GreaterOrEqual(t, svc.getTxCalls, 1, "belt-and-suspenders Confirm must have been attempted")
 }
 
 func TestBroadcastAndConfirmReturnsHashOnConfirmFailure(t *testing.T) {
@@ -354,4 +361,135 @@ func TestBroadcastAndConfirmReturnsHashOnConfirmFailure(t *testing.T) {
 	hash, err := b.BroadcastAndConfirm(context.Background(), []byte("tx"))
 	require.Error(t, err)
 	assert.Equal(t, "H", hash, "hash must be surfaced so operators can look the failed tx up on chain")
+}
+
+func TestComputeTxHashMatchesCosmosFormat(t *testing.T) {
+	// Cosmos SDK tx hashes are SHA-256 over the encoded bytes, upper-hex.
+	// SHA-256("hello") = 2CF24DBA5FB0A30E26E83B2AC5B9E29E1B161E5C1FA7425E73043362938B9824
+	got := ComputeTxHash([]byte("hello"))
+	assert.Equal(t, "2CF24DBA5FB0A30E26E83B2AC5B9E29E1B161E5C1FA7425E73043362938B9824", got)
+	assert.Len(t, got, 64, "SHA-256 hex is 64 chars")
+}
+
+func TestBroadcastAndConfirmRecoversFromDuplicateInCache(t *testing.T) {
+	// Simulates: first broadcast reached the node and landed, retry rejected
+	// as ErrTxInMempoolCache (Codespace "sdk", code 19, hash present). The
+	// tx is on chain — BroadcastAndConfirm must call Confirm despite the
+	// error and report success.
+	svc := &fakeTxSvc{
+		broadcastFn: func(_ context.Context, _ *txtypes.BroadcastTxRequest) (*txtypes.BroadcastTxResponse, error) {
+			return &txtypes.BroadcastTxResponse{
+				TxResponse: &sdk.TxResponse{
+					Codespace: "sdk",
+					Code:      19,
+					TxHash:    "NODEHASH",
+					RawLog:    "tx already in mempool",
+				},
+			}, nil
+		},
+		getTxFn: successGetTx("NODEHASH"), // the original tx lands
+	}
+	b := NewBroadcasterWithClient(svc)
+
+	hash, err := b.BroadcastAndConfirm(context.Background(), []byte("tx"))
+	require.NoError(t, err, "duplicate-in-cache must be treated as success once the tx confirms")
+	assert.Equal(t, "NODEHASH", hash, "must return the hash the node reported")
+	assert.GreaterOrEqual(t, svc.getTxCalls, 1, "Confirm must run despite the broadcast error")
+}
+
+func TestBroadcastDuplicateInMempoolWrapsSentinel(t *testing.T) {
+	svc := &fakeTxSvc{
+		broadcastFn: func(_ context.Context, _ *txtypes.BroadcastTxRequest) (*txtypes.BroadcastTxResponse, error) {
+			return &txtypes.BroadcastTxResponse{
+				TxResponse: &sdk.TxResponse{
+					Codespace: "sdk", Code: 19, TxHash: "H", RawLog: "tx already in mempool",
+				},
+			}, nil
+		},
+	}
+	b := NewBroadcasterWithClient(svc)
+
+	hash, err := b.Broadcast(context.Background(), []byte("tx"))
+	require.Error(t, err)
+	assert.Equal(t, "H", hash)
+	assert.ErrorIs(t, err, ErrTxAlreadyInMempool,
+		"code 19 in the sdk codespace must be wrapped with ErrTxAlreadyInMempool")
+	assert.NotErrorIs(t, err, ErrCheckTxRejected,
+		"the duplicate case is NOT a real CheckTx rejection")
+}
+
+func TestBroadcastNonMempoolCode19IsRealRejection(t *testing.T) {
+	// Code 19 in a NON-"sdk" codespace is some other module's error, not our
+	// duplicate sentinel. Must fall through to ErrCheckTxRejected.
+	svc := &fakeTxSvc{
+		broadcastFn: func(_ context.Context, _ *txtypes.BroadcastTxRequest) (*txtypes.BroadcastTxResponse, error) {
+			return &txtypes.BroadcastTxResponse{
+				TxResponse: &sdk.TxResponse{
+					Codespace: "flatfees", Code: 19, TxHash: "H", RawLog: "some module error",
+				},
+			}, nil
+		},
+	}
+	b := NewBroadcasterWithClient(svc)
+
+	_, err := b.Broadcast(context.Background(), []byte("tx"))
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrCheckTxRejected,
+		"code 19 outside the sdk codespace is unrelated to mempool caching")
+	assert.NotErrorIs(t, err, ErrTxAlreadyInMempool)
+}
+
+func TestBroadcastAndConfirmRecoversFromCompleteBroadcastFailure(t *testing.T) {
+	// Simulates: EVERY broadcast attempt lost its response (double failure).
+	// No hash comes back from the node. BroadcastAndConfirm must fall back to
+	// the locally-computed hash and confirm on that.
+	txBytes := []byte("some signed bytes")
+	expectedHash := ComputeTxHash(txBytes)
+
+	var confirmedHash string
+	svc := &fakeTxSvc{
+		broadcastFn: func(_ context.Context, _ *txtypes.BroadcastTxRequest) (*txtypes.BroadcastTxResponse, error) {
+			return nil, status.Error(codes.Unavailable, "always down")
+		},
+		getTxFn: func(_ context.Context, in *txtypes.GetTxRequest) (*txtypes.GetTxResponse, error) {
+			confirmedHash = in.Hash
+			return &txtypes.GetTxResponse{
+				TxResponse: &sdk.TxResponse{Code: 0, TxHash: in.Hash, Height: 100},
+			}, nil
+		},
+	}
+	b := NewBroadcasterWithClient(svc)
+
+	hash, err := b.BroadcastAndConfirm(context.Background(), txBytes)
+	require.NoError(t, err, "double-failure recovery must succeed when the tx lands")
+	assert.Equal(t, expectedHash, hash, "recovered hash must be the locally-computed one")
+	assert.Equal(t, expectedHash, confirmedHash, "Confirm must be called with the computed hash")
+}
+
+func TestBroadcastAndConfirmSkipsConfirmOnRealCheckTxRejection(t *testing.T) {
+	// Real CheckTx rejection ("insufficient fees") — the tx did NOT enter
+	// the mempool. BroadcastAndConfirm must return immediately without
+	// polling GetTx, since Confirm would just waste PollTimeout.
+	svc := &fakeTxSvc{
+		broadcastFn: func(_ context.Context, _ *txtypes.BroadcastTxRequest) (*txtypes.BroadcastTxResponse, error) {
+			return &txtypes.BroadcastTxResponse{
+				TxResponse: &sdk.TxResponse{
+					Codespace: "sdk", Code: 13, TxHash: "REJECTED", RawLog: "insufficient fees",
+				},
+			}, nil
+		},
+		getTxFn: func(_ context.Context, _ *txtypes.GetTxRequest) (*txtypes.GetTxResponse, error) {
+			t.Fatal("GetTx must NOT be called on a real CheckTx rejection")
+			return nil, nil
+		},
+	}
+	b := NewBroadcasterWithClient(svc)
+
+	hash, err := b.BroadcastAndConfirm(context.Background(), []byte("tx"))
+	require.Error(t, err)
+	assert.Equal(t, "REJECTED", hash, "hash from CheckTx failure still surfaces")
+	assert.ErrorIs(t, err, ErrCheckTxRejected,
+		"real rejection must be wrapped with ErrCheckTxRejected")
+	assert.ErrorContains(t, err, "insufficient fees")
+	assert.Equal(t, 0, svc.getTxCalls, "no PollTimeout budget wasted on a rejected tx")
 }
