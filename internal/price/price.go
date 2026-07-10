@@ -155,11 +155,10 @@ func (c *Client) window() (time.Time, time.Time) {
 }
 
 // fetchAll paginates through all trades between start and end. It advances the
-// cursor to the last trade's timestamp (not +1ms), so the next page overlaps
-// by any trades sharing that instant; a composite dedupe key drops the overlap
-// without losing sub-millisecond neighbours. Trades outside [start, end) are
-// discarded defensively — the API is asked to respect the window but not
-// trusted to.
+// cursor to the NEWEST trade's timestamp seen in the batch — not the last
+// element's — so pagination is correct whether the API returns each page
+// ascending, descending, or unsorted. A composite dedupe key drops the
+// boundary overlap; trades outside [start, end) are discarded defensively.
 func (c *Client) fetchAll(ctx context.Context, start, end time.Time) ([]Match, error) {
 	var all []Match
 	seen := make(map[string]struct{})
@@ -171,14 +170,18 @@ func (c *Client) fetchAll(ctx context.Context, start, end time.Time) ([]Match, e
 		}
 
 		added := 0
+		var maxCreated time.Time // newest Created seen in this batch
 		for _, m := range batch {
-			key := dedupeKey(m)
-			if _, dup := seen[key]; dup {
-				continue
-			}
 			t, err := time.Parse(timeFormat, m.Created)
 			if err != nil {
 				return nil, fmt.Errorf("parse created time %q: %w", m.Created, err)
+			}
+			if t.After(maxCreated) {
+				maxCreated = t
+			}
+			key := dedupeKey(m)
+			if _, dup := seen[key]; dup {
+				continue
 			}
 			if t.Before(start) || !t.Before(end) {
 				continue // API returned a trade outside the requested window; ignore
@@ -195,12 +198,12 @@ func (c *Client) fetchAll(ctx context.Context, start, end time.Time) ([]Match, e
 			break
 		}
 
-		last := batch[len(batch)-1]
-		t, err := time.Parse(timeFormat, last.Created)
-		if err != nil {
-			return nil, fmt.Errorf("parse created time %q: %w", last.Created, err)
-		}
-		cursor = t
+		// Advance to the newest trade seen. Robust to whatever order the API
+		// returns within a page: ascending → newest is batch[len-1];
+		// descending → newest is batch[0]; unsorted → somewhere in between.
+		// In every case the next page picks up from there and dedupe handles
+		// the boundary overlap.
+		cursor = maxCreated
 	}
 	return all, nil
 }

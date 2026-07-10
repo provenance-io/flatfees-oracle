@@ -86,6 +86,63 @@ func TestGetPricePaginates(t *testing.T) {
 		"VolumeHASH = %s, want 40", res.VolumeHASH.FloatString(6))
 }
 
+// TestGetPricePaginatesReverseOrderedBatch: the API's paginate-by-start_date
+// scheme is ascending (returns trades where created >= start_date, oldest N
+// first), but within a page it hands them back reversed (newest-first). Under
+// the old "cursor = batch[len-1]" logic that anchors on the OLDEST trade of
+// the batch, so the next fetch's start_date barely moves and either re-fetches
+// the same trades (dedupe → added==0 → break, LOSING later trades) or misses
+// intermediate trades. The fix anchors on maxCreated, which advances properly.
+func TestGetPricePaginatesReverseOrderedBatch(t *testing.T) {
+	pageSize := 2
+	// Four trades spread across the window, in ascending Created.
+	all := []Match{
+		{ID: "t1", Price: "0.05", Quantity: "10", Created: "2026-06-15T00:00:00.000000000Z"},
+		{ID: "t2", Price: "0.06", Quantity: "20", Created: "2026-06-15T00:00:10.000000000Z"},
+		{ID: "t3", Price: "0.07", Quantity: "20", Created: "2026-06-15T00:00:20.000000000Z"},
+		{ID: "t4", Price: "0.08", Quantity: "30", Created: "2026-06-15T00:00:30.000000000Z"},
+	}
+
+	// Server: returns up to pageSize trades where Created >= start_date, but
+	// hands them back in reversed (newest-first) order within the batch.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		startStr := r.URL.Query().Get("start_date")
+		startT, err := time.Parse(timeFormat, startStr)
+		require.NoErrorf(t, err, "start_date=%q", startStr)
+
+		var eligible []Match
+		for _, m := range all {
+			mt, _ := time.Parse(timeFormat, m.Created)
+			if !mt.Before(startT) { // Created >= startT
+				eligible = append(eligible, m)
+			}
+		}
+		if len(eligible) > pageSize {
+			eligible = eligible[:pageSize]
+		}
+		// Reverse in place: newest-first within batch.
+		for i, j := 0, len(eligible)-1; i < j; i, j = i+1, j-1 {
+			eligible[i], eligible[j] = eligible[j], eligible[i]
+		}
+		_ = json.NewEncoder(w).Encode(response{Matches: eligible})
+	}))
+	defer srv.Close()
+
+	c := New()
+	c.BaseURL = srv.URL
+	c.PageSize = pageSize
+	c.MaxRetries = 0
+	c.Now = func() time.Time { return time.Date(2026, 6, 16, 12, 0, 0, 0, time.UTC) }
+
+	res, err := c.GetPrice(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, 4, res.Trades,
+		"all four trades must be counted despite each batch being newest-first")
+	// Total volume = 10 + 20 + 20 + 30 = 80 HASH
+	assert.Zerof(t, res.VolumeHASH.Cmp(big.NewRat(80, 1)),
+		"VolumeHASH = %s, want 80", res.VolumeHASH.FloatString(6))
+}
+
 // TestGetPriceDedupesPageOverlap: the server returns the last trade of page 1
 // as the first trade of page 2 (i.e. inclusive start_date). Cursor advancement
 // refetches that boundary; the dedupe key must drop the repeat so the
