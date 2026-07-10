@@ -359,8 +359,8 @@ func TestLoad(t *testing.T) {
 			},
 		},
 		{
-			name: "parse error takes precedence over missing required",
-			envs: map[string]string{"GAS_ADJUSTMENT": "abc"},
+			name:     "parse error takes precedence over missing required",
+			envs:     map[string]string{"GAS_ADJUSTMENT": "abc"},
 			wantErrs: []string{`invalid GAS_ADJUSTMENT float "abc"`},
 		},
 	}
@@ -371,7 +371,7 @@ func TestLoad(t *testing.T) {
 			got, err := Load()
 			if len(tc.wantErrs) > 0 {
 				require.Error(t, err, "Load()")
-				errStr := err.Error();
+				errStr := err.Error()
 				for _, sub := range tc.wantErrs {
 					assert.Contains(t, errStr, sub, "Load() error")
 				}
