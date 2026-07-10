@@ -15,12 +15,10 @@ import (
 // Config holds the oracle's runtime settings.
 type Config struct {
 	// Env is a label for logs/metrics, e.g. "testnet" or "mainnet".
-	// Environment variable: ORACLE_ENV.
-	// Default is "unknown" if not set.
+	// Environment variable: ORACLE_ENV. Default "unknown".
 	Env string
 	// LogLevel is one of debug|info|warn|error.
-	// Environment variable: LOG_LEVEL.
-	// Default is "info" if not set.
+	// Environment variable: LOG_LEVEL. Default "info".
 	LogLevel string
 
 	// PriceBaseURL overrides the Figure Markets trades endpoint (optional).
@@ -48,24 +46,20 @@ type Config struct {
 	PrivateKeyHex string
 
 	// GasAdjustment multiplies the simulated gas from CalculateTxFees.
-	// Environment variable: GAS_ADJUSTMENT.
-	// Default is 1.5 if not set.
+	// Environment variable: GAS_ADJUSTMENT. Default 1.5.
 	GasAdjustment float32
 
 	// DryRun, when true, computes and logs the factor but never broadcasts.
-	// Environment variable: DRY_RUN.
-	// Default is false if not set.
+	// Environment variable: DRY_RUN. Default false.
 	DryRun bool
 
 	// HTTPTimeout bounds outbound price requests.
-	// Environment variable: HTTP_TIMEOUT.
-	// Default is 15 seconds (15s) if not set.
+	// Environment variable: HTTP_TIMEOUT. Default 15s.
 	HTTPTimeout time.Duration
 
 	// Unordered, if true, submits updates as unordered transactions without using account sequence numbers.
 	// If false, submits updates as regular transactions by looking up the account's sequence first.
-	// Environment variable: UNORDERED.
-	// Default is true if not set.
+	// Environment variable: UNORDERED. Default true.
 	Unordered bool
 
 	// UnorderedTimeout sets the timeout for unordered transactions and must be less than 5 minutes.
@@ -76,8 +70,7 @@ type Config struct {
 	// AccountNumber, if non-zero, is used when signing unordered txs instead of
 	// querying the chain each run. The account number is immutable, and a real
 	// oracle account is never number 0, so zero means "not set — look it up".
-	// Environment variable: ACCOUNT_NUMBER.
-	// Default is 0 (zero) if not set.
+	// Environment variable: ACCOUNT_NUMBER. Default 0.
 	AccountNumber uint64
 
 	// MaxPriceMoveRatio is the maximum multiplicative move (in either
