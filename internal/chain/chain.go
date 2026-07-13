@@ -212,9 +212,15 @@ func accountInfoFromQC(ctx context.Context, qc accountQC, cdc codec.Codec, addr 
 	if err != nil {
 		return 0, 0, fmt.Errorf("query account %s: %w", addr, err)
 	}
+	if resp == nil || resp.Account == nil {
+		return 0, 0, fmt.Errorf("unpack account %s: nil account payload in response", addr)
+	}
 	var acc sdk.AccountI
 	if err := cdc.UnpackAny(resp.Account, &acc); err != nil {
 		return 0, 0, fmt.Errorf("unpack account %s: %w", addr, err)
+	}
+	if acc == nil {
+		return 0, 0, fmt.Errorf("unpack account %s: codec returned nil account", addr)
 	}
 	return acc.GetAccountNumber(), acc.GetSequence(), nil
 }
