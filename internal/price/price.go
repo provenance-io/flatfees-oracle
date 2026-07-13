@@ -32,7 +32,11 @@ const (
 	// ~500 bytes each is ~100 KiB; 32 MiB gives 300× headroom without letting
 	// a runaway upstream OOM the pod.
 	maxResponseBytes = 32 << 20 // 32 MiB
-	// timeFormat is the nanosecond timestamp format used by the API.
+	// timeFormat is the timestamp format we SEND to the API in URL query
+	// params — fixed-width nanoseconds, the shape the API has always accepted.
+	// Note: the API's response timestamps may have FEWER than 9 fractional
+	// digits (e.g. .66608799Z), so parsing uses time.RFC3339Nano (nines)
+	// instead of this fixed layout.
 	timeFormat = "2006-01-02T15:04:05.000000000Z"
 )
 
@@ -181,7 +185,7 @@ func (c *Client) fetchAll(ctx context.Context, start, end time.Time) ([]Match, e
 		added := 0
 		var maxCreated time.Time // newest Created seen in this batch
 		for _, m := range batch {
-			t, err := time.Parse(timeFormat, m.Created)
+			t, err := time.Parse(time.RFC3339Nano, m.Created)
 			if err != nil {
 				return nil, fmt.Errorf("parse created time %q: %w", m.Created, err)
 			}

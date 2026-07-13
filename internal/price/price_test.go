@@ -3,6 +3,7 @@ package price
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
@@ -108,12 +109,12 @@ func TestGetPricePaginatesReverseOrderedBatch(t *testing.T) {
 	// hands them back in reversed (newest-first) order within the batch.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		startStr := r.URL.Query().Get("start_date")
-		startT, err := time.Parse(timeFormat, startStr)
+		startT, err := time.Parse(time.RFC3339Nano, startStr)
 		require.NoErrorf(t, err, "start_date=%q", startStr)
 
 		var eligible []Match
 		for _, m := range all {
-			mt, _ := time.Parse(timeFormat, m.Created)
+			mt, _ := time.Parse(time.RFC3339Nano, m.Created)
 			if !mt.Before(startT) { // Created >= startT
 				eligible = append(eligible, m)
 			}
@@ -256,6 +257,45 @@ func TestGetPriceEmptyWindow(t *testing.T) {
 
 	_, err := c.GetPrice(context.Background())
 	assert.ErrorIs(t, err, ErrNoTrades, "should return ErrNoTrades sentinel so callers can skip cleanly")
+}
+
+// TestGetPriceHandlesVariablePrecisionTimestamps: the API returns Created
+// timestamps with a variable number of fractional-second digits (production
+// has seen 8 digits, e.g. .66608799Z). Parsing must accept anything up to 9
+// digits, matching time.RFC3339Nano.
+func TestGetPriceHandlesVariablePrecisionTimestamps(t *testing.T) {
+	// One trade per fractional-second width from 0 to 9 digits.
+	timestamps := []string{
+		"2026-06-15T00:00:00Z",              // 0 digits
+		"2026-06-15T00:00:01.1Z",            // 1
+		"2026-06-15T00:00:02.12Z",           // 2
+		"2026-06-15T00:00:03.123Z",          // 3
+		"2026-06-15T00:00:04.66608799Z",     // 8 — the exact width that hit production
+		"2026-06-15T00:00:05.123456789Z",    // 9
+	}
+	all := make([]Match, len(timestamps))
+	for i, ts := range timestamps {
+		all[i] = Match{
+			ID:       fmt.Sprintf("t%d", i),
+			Price:    "0.05",
+			Quantity: "1",
+			Created:  ts,
+		}
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(response{Matches: all})
+	}))
+	defer srv.Close()
+
+	c := New()
+	c.BaseURL = srv.URL
+	c.MaxRetries = 0
+	c.Now = func() time.Time { return time.Date(2026, 6, 16, 12, 0, 0, 0, time.UTC) }
+
+	res, err := c.GetPrice(context.Background())
+	require.NoError(t, err, "variable-precision fractional seconds must parse")
+	assert.Equal(t, len(timestamps), res.Trades)
 }
 
 // TestGetPriceRejectsOversizedResponse: the response body exceeds
