@@ -266,12 +266,12 @@ func TestGetPriceEmptyWindow(t *testing.T) {
 func TestGetPriceHandlesVariablePrecisionTimestamps(t *testing.T) {
 	// One trade per fractional-second width from 0 to 9 digits.
 	timestamps := []string{
-		"2026-06-15T00:00:00Z",              // 0 digits
-		"2026-06-15T00:00:01.1Z",            // 1
-		"2026-06-15T00:00:02.12Z",           // 2
-		"2026-06-15T00:00:03.123Z",          // 3
-		"2026-06-15T00:00:04.66608799Z",     // 8 — the exact width that hit production
-		"2026-06-15T00:00:05.123456789Z",    // 9
+		"2026-06-15T00:00:00Z",           // 0 digits
+		"2026-06-15T00:00:01.1Z",         // 1
+		"2026-06-15T00:00:02.12Z",        // 2
+		"2026-06-15T00:00:03.123Z",       // 3
+		"2026-06-15T00:00:04.66608799Z",  // 8 — the exact width that hit production
+		"2026-06-15T00:00:05.123456789Z", // 9
 	}
 	all := make([]Match, len(timestamps))
 	for i, ts := range timestamps {
