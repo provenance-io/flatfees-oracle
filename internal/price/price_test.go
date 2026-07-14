@@ -315,8 +315,8 @@ func TestGetPriceRejectsOversizedResponse(t *testing.T) {
 
 	c := New()
 	c.BaseURL = srv.URL
-	c.MaxRetries = 3           // deliberately > 0 to prove no retry on oversize
-	c.MaxResponseBytes = 1024  // < oversized body
+	c.MaxRetries = 3          // deliberately > 0 to prove no retry on oversize
+	c.MaxResponseBytes = 1024 // < oversized body
 	c.RetryWait = time.Millisecond
 	c.Now = func() time.Time { return time.Date(2026, 6, 16, 12, 0, 0, 0, time.UTC) }
 
