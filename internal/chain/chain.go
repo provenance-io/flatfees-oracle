@@ -31,6 +31,7 @@ import (
 	flatfeestypes "github.com/provenance-io/provenance/x/flatfees/types"
 
 	"github.com/provenance-io/flatfees-oracle/internal/convert"
+	"github.com/provenance-io/flatfees-oracle/internal/retry"
 )
 
 // QueryClient is the subset of the flatfees query client this package needs.
@@ -58,21 +59,36 @@ func NewReaderWithClient(qc QueryClient) *Reader {
 }
 
 // CurrentParams returns the live flatfees params, including the current
-// conversion factor and the set of authorized oracle addresses.
+// conversion factor and the set of authorized oracle addresses. Retries on
+// transient gRPC errors so a single node blip doesn't fail the daily run.
 func (r *Reader) CurrentParams(ctx context.Context) (flatfeestypes.Params, error) {
-	resp, err := r.qc.Params(ctx, &flatfeestypes.QueryParamsRequest{})
+	var params flatfeestypes.Params
+	err := retry.Do(ctx, retry.Default(), func() error {
+		resp, err := r.qc.Params(ctx, &flatfeestypes.QueryParamsRequest{})
+		if err != nil {
+			return err
+		}
+		params = resp.Params
+		return nil
+	})
 	if err != nil {
 		return flatfeestypes.Params{}, fmt.Errorf("query flatfees params: %w", err)
 	}
-	return resp.Params, nil
+	return params, nil
 }
 
 // EstimateTxFees runs the CalculateTxFees query for an encoded (unsigned) tx,
-// returning the estimated gas and the flat total fee to set on the tx.
+// returning the estimated gas and the flat total fee to set on the tx. Retries
+// on transient gRPC errors.
 func (r *Reader) EstimateTxFees(ctx context.Context, txBytes []byte, gasAdjustment float32) (*flatfeestypes.QueryCalculateTxFeesResponse, error) {
-	resp, err := r.qc.CalculateTxFees(ctx, &flatfeestypes.QueryCalculateTxFeesRequest{
-		TxBytes:       txBytes,
-		GasAdjustment: gasAdjustment,
+	var resp *flatfeestypes.QueryCalculateTxFeesResponse
+	err := retry.Do(ctx, retry.Default(), func() error {
+		var callErr error
+		resp, callErr = r.qc.CalculateTxFees(ctx, &flatfeestypes.QueryCalculateTxFeesRequest{
+			TxBytes:       txBytes,
+			GasAdjustment: gasAdjustment,
+		})
+		return callErr
 	})
 	if err != nil {
 		return nil, fmt.Errorf("calculate tx fees: %w", err)
@@ -128,6 +144,39 @@ func IsAuthorizedOracle(params flatfeestypes.Params, addr string) bool {
 	return false
 }
 
+// IsFactorSet reports whether the on-chain factor has real amounts on both
+// sides. Fresh chains / bootstrap runs may present an all-zero factor; the
+// sanity-band check must skip when there's nothing meaningful to compare
+// against.
+func IsFactorSet(f flatfeestypes.ConversionFactor) bool {
+	return !f.DefinitionAmount.Amount.IsNil() && !f.DefinitionAmount.Amount.IsZero() &&
+		!f.ConvertedAmount.Amount.IsNil() && !f.ConvertedAmount.Amount.IsZero()
+}
+
+// ImpliedPrice recovers the USD-per-HASH price implied by a flatfees factor.
+//
+// From the module convention:
+//
+//	converted_amount / definition_amount = 1e6 / P
+//
+// where converted_amount is in nhash and definition_amount is in musd.
+// Rearranging:
+//
+//	P = definition_amount * 1e6 / converted_amount
+//
+// Returns nil for a zero/unset factor (bootstrap case — caller should check
+// IsFactorSet first if that matters).
+func ImpliedPrice(f flatfeestypes.ConversionFactor) *big.Rat {
+	if !IsFactorSet(f) {
+		return nil
+	}
+	def := new(big.Rat).SetInt(f.DefinitionAmount.Amount.BigInt())
+	conv := new(big.Rat).SetInt(f.ConvertedAmount.Amount.BigInt())
+	// P = def * 1e6 / conv
+	p := new(big.Rat).Mul(def, new(big.Rat).SetInt64(1_000_000))
+	return p.Quo(p, conv)
+}
+
 // intFromBig converts a *big.Int to cosmossdk.io/math.Int, rejecting nil/negative.
 func intFromBig(b *big.Int) (math.Int, bool) {
 	if b == nil || b.Sign() < 0 {
@@ -136,16 +185,42 @@ func intFromBig(b *big.Int) (math.Int, bool) {
 	return math.NewIntFromBigInt(b), true
 }
 
+// accountQC is the narrow subset of authtypes.QueryClient AccountInfo needs.
+// Extracted so tests can inject a fake without implementing the full auth
+// query surface. authtypes.QueryClient satisfies it structurally.
+type accountQC interface {
+	Account(ctx context.Context, in *authtypes.QueryAccountRequest, opts ...grpc.CallOption) (*authtypes.QueryAccountResponse, error)
+}
+
 // AccountInfo queries the auth module for an account's number and sequence.
+// Retries on transient gRPC errors; the unpack step is deterministic and not
+// retried.
 func AccountInfo(ctx context.Context, conn grpc1.ClientConn, cdc codec.Codec, addr string) (accNum, sequence uint64, err error) {
-	qc := authtypes.NewQueryClient(conn)
-	resp, err := qc.Account(ctx, &authtypes.QueryAccountRequest{Address: addr})
+	return accountInfoFromQC(ctx, authtypes.NewQueryClient(conn), cdc, addr)
+}
+
+// accountInfoFromQC is the testable core of AccountInfo. Kept unexported so
+// callers pin against the gRPC ClientConn wrapper; tests exercise this
+// directly with a fake accountQC.
+func accountInfoFromQC(ctx context.Context, qc accountQC, cdc codec.Codec, addr string) (uint64, uint64, error) {
+	var resp *authtypes.QueryAccountResponse
+	err := retry.Do(ctx, retry.Default(), func() error {
+		var callErr error
+		resp, callErr = qc.Account(ctx, &authtypes.QueryAccountRequest{Address: addr})
+		return callErr
+	})
 	if err != nil {
 		return 0, 0, fmt.Errorf("query account %s: %w", addr, err)
+	}
+	if resp == nil || resp.Account == nil {
+		return 0, 0, fmt.Errorf("unpack account %s: nil account payload in response", addr)
 	}
 	var acc sdk.AccountI
 	if err := cdc.UnpackAny(resp.Account, &acc); err != nil {
 		return 0, 0, fmt.Errorf("unpack account %s: %w", addr, err)
+	}
+	if acc == nil {
+		return 0, 0, fmt.Errorf("unpack account %s: codec returned nil account", addr)
 	}
 	return acc.GetAccountNumber(), acc.GetSequence(), nil
 }

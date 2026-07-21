@@ -7,12 +7,18 @@ package price
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math/big"
 	"net/http"
 	"time"
 )
+
+// ErrNoTrades is returned by GetPrice when the fetch succeeded but the trailing
+// window contained no trades. Callers should treat it as "no update possible
+// today, try again tomorrow" — not a failure that warrants paging.
+var ErrNoTrades = errors.New("no trades in window")
 
 const (
 	// DefaultBaseURL is the internal Figure Markets HASH-USD trades endpoint.
@@ -22,7 +28,15 @@ const (
 	defaultPageSize = 200
 	// windowDays is the trailing window (ending midnight Eastern) to aggregate.
 	windowDays = 7
-	// timeFormat is the nanosecond timestamp format used by the API.
+	// maxResponseBytes caps a single price-page response body. 200 trades at
+	// ~500 bytes each is ~100 KiB; 32 MiB gives 300× headroom without letting
+	// a runaway upstream OOM the pod.
+	maxResponseBytes = 32 << 20 // 32 MiB
+	// timeFormat is the timestamp format we SEND to the API in URL query
+	// params — fixed-width nanoseconds, the shape the API has always accepted.
+	// Note: the API's response timestamps may have FEWER than 9 fractional
+	// digits (e.g. .66608799Z), so parsing uses time.RFC3339Nano (nines)
+	// instead of this fixed layout.
 	timeFormat = "2006-01-02T15:04:05.000000000Z"
 )
 
@@ -49,12 +63,13 @@ type response struct {
 // Client fetches and aggregates HASH-USD trades. The zero value is not usable;
 // construct one with New.
 type Client struct {
-	BaseURL    string
-	HTTP       *http.Client
-	PageSize   int
-	WindowDays int
-	MaxRetries int           // additional attempts on transient failures
-	RetryWait  time.Duration // base backoff between retries
+	BaseURL          string
+	HTTP             *http.Client
+	PageSize         int
+	WindowDays       int
+	MaxRetries       int           // additional attempts on transient failures
+	RetryWait        time.Duration // base backoff between retries
+	MaxResponseBytes int64         // cap on a single price-page response body
 	// Now allows tests to pin the window. Defaults to time.Now.
 	Now func() time.Time
 }
@@ -62,13 +77,14 @@ type Client struct {
 // New returns a Client with sensible defaults.
 func New() *Client {
 	return &Client{
-		BaseURL:    DefaultBaseURL,
-		HTTP:       &http.Client{Timeout: 15 * time.Second},
-		PageSize:   defaultPageSize,
-		WindowDays: windowDays,
-		MaxRetries: 3,
-		RetryWait:  500 * time.Millisecond,
-		Now:        time.Now,
+		BaseURL:          DefaultBaseURL,
+		HTTP:             &http.Client{Timeout: 15 * time.Second},
+		PageSize:         defaultPageSize,
+		WindowDays:       windowDays,
+		MaxRetries:       3,
+		RetryWait:        500 * time.Millisecond,
+		MaxResponseBytes: maxResponseBytes,
+		Now:              time.Now,
 	}
 }
 
@@ -77,6 +93,9 @@ type Result struct {
 	// PriceUSDPerHASH is the volume-weighted average price (USD per HASH) as an
 	// exact rational.
 	PriceUSDPerHASH *big.Rat
+	// VolumeHASH is the total quantity traded across the window (HASH). Used
+	// by liquidity guards to refuse thin-book updates.
+	VolumeHASH *big.Rat
 	// Trades is the number of trades aggregated.
 	Trades int
 	// WindowStart and WindowEnd bound the trades considered (UTC).
@@ -86,62 +105,130 @@ type Result struct {
 
 // GetPrice fetches all trades in the trailing window and returns their VWAP.
 func (c *Client) GetPrice(ctx context.Context) (Result, error) {
-	start, end := c.window()
+	start, end, err := c.window()
+	if err != nil {
+		return Result{}, err
+	}
 	matches, err := c.fetchAll(ctx, start, end)
 	if err != nil {
 		return Result{}, err
 	}
 	if len(matches) == 0 {
-		return Result{}, fmt.Errorf("no HASH-USD trades in window %s..%s",
+		return Result{}, fmt.Errorf("%w %s..%s", ErrNoTrades,
 			start.Format(time.RFC3339), end.Format(time.RFC3339))
 	}
 	vwap, err := VWAP(matches)
 	if err != nil {
 		return Result{}, err
 	}
+	volume, err := totalVolume(matches)
+	if err != nil {
+		return Result{}, err
+	}
 	return Result{
 		PriceUSDPerHASH: vwap,
+		VolumeHASH:      volume,
 		Trades:          len(matches),
 		WindowStart:     start,
 		WindowEnd:       end,
 	}, nil
 }
 
+// totalVolume sums the (positive) quantities across all trades. Trades with
+// non-positive or unparseable quantities are excluded — matching VWAP's
+// treatment — so the reported volume corresponds to the trades that actually
+// participated in the average.
+func totalVolume(matches []Match) (*big.Rat, error) {
+	total := new(big.Rat)
+	for i, m := range matches {
+		q, ok := new(big.Rat).SetString(string(m.Quantity))
+		if !ok {
+			return nil, fmt.Errorf("trade %d: invalid quantity %q", i, m.Quantity)
+		}
+		if q.Sign() <= 0 {
+			continue
+		}
+		total.Add(total, q)
+	}
+	return total, nil
+}
+
 // window returns the [start, end) UTC bounds: the WindowDays ending at midnight
 // Eastern of the current date.
-func (c *Client) window() (time.Time, time.Time) {
-	now := c.Now()
+func (c *Client) window() (time.Time, time.Time, error) {
 	eastern, err := time.LoadLocation("America/New_York")
-	if err == nil {
-		now = now.In(eastern)
+	if err != nil {
+		return time.Time{}, time.Time{}, fmt.Errorf("cannot load timezone America/New_York: %w", err)
 	}
+	now := c.Now().In(eastern)
 	endLocal := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 	endUTC := endLocal.UTC()
 	startUTC := endUTC.AddDate(0, 0, -c.WindowDays)
-	return startUTC, endUTC
+	return startUTC, endUTC, nil
 }
 
-// fetchAll paginates through all trades between start and end.
+// fetchAll paginates through all trades between start and end. It advances the
+// cursor to the NEWEST trade's timestamp seen in the batch — not the last
+// element's — so pagination is correct whether the API returns each page
+// ascending, descending, or unsorted. A composite dedupe key drops the
+// boundary overlap; trades outside [start, end) are discarded defensively.
 func (c *Client) fetchAll(ctx context.Context, start, end time.Time) ([]Match, error) {
 	var all []Match
+	seen := make(map[string]struct{})
 	cursor := start
 	for {
 		batch, err := c.fetchPage(ctx, cursor, end)
 		if err != nil {
 			return nil, err
 		}
-		all = append(all, batch...)
-		if len(batch) < c.PageSize {
+
+		added := 0
+		var maxCreated time.Time // newest Created seen in this batch
+		for _, m := range batch {
+			t, err := time.Parse(time.RFC3339Nano, m.Created)
+			if err != nil {
+				return nil, fmt.Errorf("parse created time %q: %w", m.Created, err)
+			}
+			if t.After(maxCreated) {
+				maxCreated = t
+			}
+			key := dedupeKey(m)
+			if _, dup := seen[key]; dup {
+				continue
+			}
+			if t.Before(start) || !t.Before(end) {
+				continue // API returned a trade outside the requested window; ignore
+			}
+			seen[key] = struct{}{}
+			all = append(all, m)
+			added++
+		}
+
+		// Stop when the page is short (nothing more to fetch) or when we
+		// made no forward progress (server stuck, or every remaining trade
+		// falls outside the window). Either way, further pages can't help.
+		if len(batch) < c.PageSize || added == 0 {
 			break
 		}
-		last := batch[len(batch)-1]
-		t, err := time.Parse(timeFormat, last.Created)
-		if err != nil {
-			return nil, fmt.Errorf("parse created time %q: %w", last.Created, err)
-		}
-		cursor = t.Add(time.Millisecond)
+
+		// Advance to the newest trade seen. Robust to whatever order the API
+		// returns within a page: ascending → newest is batch[len-1];
+		// descending → newest is batch[0]; unsorted → somewhere in between.
+		// In every case the next page picks up from there and dedupe handles
+		// the boundary overlap.
+		cursor = maxCreated
 	}
 	return all, nil
+}
+
+// dedupeKey picks the best available unique identifier for a trade. Prefers
+// the API's `id`; falls back to settlementTxHash + created + price + quantity
+// so pagination stays correct even if the response ever omits `id`.
+func dedupeKey(m Match) string {
+	if m.ID != "" {
+		return "id:" + m.ID
+	}
+	return "c:" + m.SettlementTxHash + "|" + m.Created + "|" + string(m.Price) + "|" + string(m.Quantity)
 }
 
 // fetchPage retrieves a single page, retrying transient failures with backoff.
@@ -195,8 +282,11 @@ func (c *Client) doFetch(ctx context.Context, url string) (matches []Match, retr
 		return nil, retry, fmt.Errorf("unexpected status %d from %s: %s", resp.StatusCode, url, body)
 	}
 
+	// Cap the body so a runaway upstream can't OOM the pod. json.Decoder
+	// streams as it reads, so this bounds allocation too.
+	body := http.MaxBytesReader(nil, resp.Body, c.MaxResponseBytes)
 	var r response
-	if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
+	if err := json.NewDecoder(body).Decode(&r); err != nil {
 		return nil, false, fmt.Errorf("decode response from %s: %w", url, err)
 	}
 	return r.Matches, false, nil

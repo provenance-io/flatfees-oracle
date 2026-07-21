@@ -52,6 +52,7 @@ func (s *Submitter) SubmitOrdered(ctx context.Context, msg sdk.Msg) (string, err
 }
 
 // SubmitUnordered builds, signs, and broadcasts an unordered tx using timeout-based replay protection.
+// If the provided accNum is 0, the actual accNum will be looked up and used.
 func (s *Submitter) SubmitUnordered(ctx context.Context, msg sdk.Msg, accNum uint64, timeout time.Duration) (string, error) {
 	if accNum == 0 {
 		var err error

@@ -24,32 +24,57 @@ const (
 	prefixTestNet = "tp"
 )
 
-// SetSDKConfig sets the global bech32 prefixes for the given account prefix and seals the config.
-func SetSDKConfig(hrp string) {
+// SetSDKConfig sets the global bech32 prefixes for the given account prefix.
+// When seal is true, it also seals the cosmos-sdk config to prevent further
+// mutation — any subsequent call to any Set* on the config panics.
+//
+// Invariant: at most one caller per process should pass seal=true, and it
+// should be the last touch of the SDK config for the run's lifetime.
+// Production calls it once from main.go (seal=true). Tests call it with
+// seal=false so multiple test files can share the same config without
+// tripping the seal.
+func SetSDKConfig(hrp string, seal bool) {
 	c := sdk.GetConfig()
 	c.SetBech32PrefixForAccount(hrp, hrp+"pub")
 	c.SetBech32PrefixForValidator(hrp+"valoper", hrp+"valoperpub")
 	c.SetBech32PrefixForConsensusNode(hrp+"valcons", hrp+"valconspub")
-	c.Seal()
+	if seal {
+		c.Seal()
+	}
 }
 
 // SetChainConfig configures Provenance bech32 prefixes and coin type; must run before any address parsing.
-func SetChainConfig(testnet bool) {
+// When seal is true, it also seals the cosmos-sdk config to prevent further
+// mutation — any subsequent call to any Set* on the config panics.
+//
+// Invariant: at most one caller per process should pass seal=true, and it
+// should be the last touch of the SDK config for the run's lifetime.
+// Production calls it once from main.go (seal=true). Tests call it with
+// seal=false so multiple test files can share the same config without
+// tripping the seal.
+func SetChainConfig(testnet bool, seal bool) {
 	hrp := prefixMainNet
 	if testnet {
 		hrp = prefixTestNet
 	}
-	SetSDKConfig(hrp)
+	SetSDKConfig(hrp, seal)
 }
 
-// SetChainConfigFromAddress derives the prefix from an account address
-// oracle address itself, the signer can never derive a mismatching prefix.
-func SetChainConfigFromAddress(addr string) error {
+// SetChainConfigFromAddress derives the hrp from an account address and sets the sdk config accordingly.
+// When seal is true, it also seals the cosmos-sdk config to prevent further
+// mutation — any subsequent call to any Set* on the config panics.
+//
+// Invariant: at most one caller per process should pass seal=true, and it
+// should be the last touch of the SDK config for the run's lifetime.
+// Production calls it once from main.go (seal=true). Tests call it with
+// seal=false so multiple test files can share the same config without
+// tripping the seal.
+func SetChainConfigFromAddress(addr string, seal bool) error {
 	hrp, _, err := bech32.DecodeAndConvert(addr)
 	if err != nil {
 		return fmt.Errorf("decode oracle address %q: %w", addr, err)
 	}
-	SetSDKConfig(hrp)
+	SetSDKConfig(hrp, seal)
 	return nil
 }
 

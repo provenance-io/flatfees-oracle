@@ -108,7 +108,7 @@ echo ">> running the oracle (gas_adjustment=$GAS_ADJUSTMENT)"
 set +e
 ( cd "$ORACLE_REPO" && \
   DRY_RUN=false ORACLE_ENV=testnet \
-  GRPC_ENDPOINT="$GRPC" CHAIN_ID="$CHAIN_ID" \
+  GRPC_ENDPOINT="$GRPC" GRPC_INSECURE=true CHAIN_ID="$CHAIN_ID" \
   ORACLE_ADDRESS="$ORACLE_ADDR" PRIVATE_KEY_HEX="$PRIV_HEX" \
   UNORDERED=false GAS_ADJUSTMENT="$GAS_ADJUSTMENT" \
   go run ./cmd/oracle )
