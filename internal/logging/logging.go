@@ -14,6 +14,8 @@ import (
 	"github.com/google/uuid"
 )
 
+const serviceName = "flatfees-oracle"
+
 // New returns a Logger emitting JSON to stdout at the given level, tagged
 // with the service name and environment so downstream filtering is trivial.
 func New(level, env string) Logger {
@@ -22,7 +24,7 @@ func New(level, env string) Logger {
 	id := strings.Split(uuid.New().String(), "-")[1]
 	base := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: parseLevel(level)})
 	slogger := slog.New(NewSanitizingHandler(base)).With(
-		slog.String("service", "flatfees-oracle"),
+		slog.String("service", serviceName),
 		slog.String("env", env),
 	)
 	return &SlogLogger{

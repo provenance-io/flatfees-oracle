@@ -47,6 +47,13 @@ func run() error {
 	}
 
 	log := logging.New(cfg.LogLevel, cfg.Env)
+
+	// Register the slack notifier.
+	if len(cfg.SlackWebhookURL) > 0 {
+		slackNotifier := logging.NewSlackNotifier(cfg.SlackWebhookURL, cfg.Env)
+		logging.RegisterSlackNotifier(slackNotifier)
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 

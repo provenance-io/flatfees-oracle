@@ -32,12 +32,12 @@ type SlackNotifier struct {
 	testMode    bool
 }
 
-func NewSlackNotifier(webhookURL string, service string, env string) *SlackNotifier {
+func NewSlackNotifier(webhookURL string, env string) *SlackNotifier {
 	testMode := env != "mainnet"
 
 	return &SlackNotifier{
 		webhookURL:  webhookURL,
-		service:     service,
+		service:     serviceName,
 		env:         env,
 		client:      &http.Client{Timeout: 3 * time.Second},
 		notifyCount: 0,
