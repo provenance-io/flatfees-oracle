@@ -82,5 +82,10 @@ func replaceSecret(msg, secret, placeholder string) string {
 	if secret == "" {
 		return msg
 	}
-	return strings.ReplaceAll(msg, secret, placeholder)
+	msg = strings.ReplaceAll(msg, secret, placeholder)
+	// If the secret starts with 0x, look for (and replace) all instances of the rest of the secret.
+	if raw := strings.TrimPrefix(strings.TrimSpace(secret), "0x"); raw != secret {
+		msg = strings.ReplaceAll(msg, raw, placeholder)
+	}
+	return msg
 }
