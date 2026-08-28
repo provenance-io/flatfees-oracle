@@ -70,19 +70,6 @@ func sanitizeAttr(a slog.Attr) slog.Attr {
 	}
 }
 
-func SanitizeValue(v any) any {
-	switch x := v.(type) {
-	case string:
-		return SanitizeMsg(x)
-
-	case error:
-		return SanitizeMsg(x.Error())
-
-	default:
-		return v
-	}
-}
-
 func SanitizeMsg(msg string) string {
 	if privateKeyHex := os.Getenv("PRIVATE_KEY_HEX"); privateKeyHex != "" {
 		msg = replaceSecret(msg, privateKeyHex, "<PRIVATE_KEY_HEX>")
@@ -95,9 +82,5 @@ func replaceSecret(msg, secret, placeholder string) string {
 	if secret == "" {
 		return msg
 	}
-	msg = strings.ReplaceAll(msg, secret, placeholder)
-	if trimmed := strings.TrimRight(secret, "/"); trimmed != secret {
-		msg = strings.ReplaceAll(msg, trimmed, placeholder)
-	}
-	return msg
+	return strings.ReplaceAll(msg, secret, placeholder)
 }
