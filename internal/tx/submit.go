@@ -2,12 +2,13 @@ package tx
 
 import (
 	"context"
-	"log/slog"
 	"time"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
 	flatfeestypes "github.com/provenance-io/provenance/x/flatfees/types"
+
+	"github.com/provenance-io/flatfees-oracle/internal/logging"
 )
 
 // Estimator estimates fees and gas for unsigned transactions without depending on chain types.
@@ -25,7 +26,7 @@ type Submitter struct {
 	Broadcaster   *Broadcaster
 	Account       AccountFetcher
 	GasAdjustment float32
-	Logger        *slog.Logger // optional
+	Logger        logging.Logger // optional
 }
 
 // SubmitOrdered builds, signs, and broadcasts an ordered tx using account sequence for replay protection.

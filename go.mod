@@ -7,6 +7,7 @@ require (
 	cosmossdk.io/x/tx v0.14.0
 	github.com/cosmos/cosmos-sdk v0.53.6
 	github.com/cosmos/gogoproto v1.7.2
+	github.com/google/uuid v1.6.0
 	github.com/provenance-io/provenance v1.29.0
 	github.com/stretchr/testify v1.11.1
 	google.golang.org/grpc v1.81.1
