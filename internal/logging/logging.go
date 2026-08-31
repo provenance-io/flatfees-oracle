@@ -48,7 +48,7 @@ func parseLevel(s string) slog.Level {
 	}
 }
 
-// Logger defines the interface for logging operations
+// Logger defines the interface for logging operations.
 type Logger interface {
 	Debug(msg string, args ...any)
 	Info(msg string, args ...any)
@@ -58,7 +58,7 @@ type Logger interface {
 	With(args ...any) Logger
 }
 
-// SlogLogger implements Logger using slog
+// SlogLogger implements Logger using slog.
 type SlogLogger struct {
 	logger *slog.Logger
 	ID     *string
@@ -66,22 +66,22 @@ type SlogLogger struct {
 	mutex  *sync.Mutex
 }
 
-// Debug logs at debug level
+// Debug logs at debug level.
 func (l *SlogLogger) Debug(msg string, args ...any) {
 	l.log(slog.LevelDebug, msg, args...)
 }
 
-// Info logs at info level
+// Info logs at info level and sends notification to Slack if configured.
 func (l *SlogLogger) Info(msg string, args ...any) {
 	l.log(slog.LevelInfo, msg, args...)
 }
 
-// Warn logs at warn level
+// Warn logs at warn level and sends notification to Slack if configured.
 func (l *SlogLogger) Warn(msg string, args ...any) {
 	l.log(slog.LevelWarn, msg, args...)
 }
 
-// Error logs at error level and sends notification to Slack if configured
+// Error logs at error level and sends notification to Slack if configured.
 func (l *SlogLogger) Error(msg string, args ...any) {
 	l.log(slog.LevelError, msg, args...)
 }
