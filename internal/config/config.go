@@ -102,8 +102,8 @@ type Config struct {
 	ForceUpdate bool
 }
 
-// Load reads configuration from environment variables, applying defaults and
-// validating required fields.
+// Load reads configuration from environment variables, applying defaults and validating required fields.
+// The config is returned regardless of error, but might have missing (or erroneous) entries.
 func Load() (Config, error) {
 	et := &errorTracker{}
 	c := Config{
@@ -129,7 +129,7 @@ func Load() (Config, error) {
 	}
 
 	if et.HasError() {
-		return Config{}, et.GetError()
+		return c, et.GetError()
 	}
 
 	// In non-dry-run mode the chain settings are required.
@@ -148,10 +148,10 @@ func Load() (Config, error) {
 			missing = append(missing, "PRIVATE_KEY_HEX")
 		}
 		if len(missing) > 0 {
-			return Config{}, fmt.Errorf("missing required config: %s", strings.Join(missing, ", "))
+			return c, fmt.Errorf("missing required config: %s", strings.Join(missing, ", "))
 		}
 		if c.Unordered && c.UnorderedTimeout > 5*time.Minute {
-			return Config{}, fmt.Errorf("UNORDERED_TIMEOUT %s must be at most the chain max of 5m", c.UnorderedTimeout)
+			return c, fmt.Errorf("UNORDERED_TIMEOUT %s must be at most the chain max of 5m", c.UnorderedTimeout)
 		}
 	}
 
