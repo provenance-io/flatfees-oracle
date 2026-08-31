@@ -26,8 +26,6 @@ type SlackNotifier struct {
 	service     string
 	env         string
 	client      *http.Client
-	notifyCount int64
-	lastNotify  time.Time
 	mutex       *sync.Mutex
 	testMode    bool
 }
@@ -40,8 +38,6 @@ func NewSlackNotifier(webhookURL string, env string) *SlackNotifier {
 		service:     serviceName,
 		env:         env,
 		client:      &http.Client{Timeout: 3 * time.Second},
-		notifyCount: 0,
-		lastNotify:  time.Now(),
 		mutex:       &sync.Mutex{},
 		testMode:    testMode,
 	}
