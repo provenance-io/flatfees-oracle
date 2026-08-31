@@ -41,10 +41,29 @@ func NewSlackNotifier(webhookURL string, env string) *SlackNotifier {
 	}
 }
 
+func LogStartup(log Logger) {
+	// For the first log message, we clear out the defaultSlackNotifier so that calling log.Info
+	// won't also get sent to slack. We'll send a slightly different message to slack.
+	sn := defaultSlackNotifier
+	defaultSlackNotifier = nil
+	defer func() {
+		defaultSlackNotifier = sn
+	}()
+
+	log.Info("Flatfees Oracle started")
+	if sn != nil {
+		startupFields := map[string]any{
+			"environment": defaultSlackNotifier.env,
+			"timestamp":   time.Now().Format(time.RFC3339),
+		}
+		sn.NotifyStartup(context.Background(), "Flatfees Oracle started", startupFields)
+	}
+}
+
 // NotifyStartup sends a formatted startup banner to Slack.
 // It is deliberately best-effort: it will never panic or return an error.
 // This bypasses throttling since startup is a one-time event.
-func (s *SlackNotifier) NotifyStartup(ctx context.Context, title string, message string, fields map[string]any) {
+func (s *SlackNotifier) NotifyStartup(ctx context.Context, title string, fields map[string]any) {
 	if s == nil || s.webhookURL == "" {
 		return // misconfigured, just do nothing
 	}
@@ -53,7 +72,7 @@ func (s *SlackNotifier) NotifyStartup(ctx context.Context, title string, message
 	banner := ":prov::prov::prov::prov::prov::prov::prov:"
 
 	// Build the formatted message
-	text := fmt.Sprintf("*%s*\n%s\n%s", title, banner, message)
+	text := fmt.Sprintf("*%s*\n%s", title, banner)
 
 	if len(fields) > 0 {
 		// attach fields as a JSON blob at the bottom

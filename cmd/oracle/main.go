@@ -54,6 +54,8 @@ func run() error {
 
 	log := logging.New(cfg.LogLevel, cfg.Env)
 
+	logging.LogStartup(log)
+
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
