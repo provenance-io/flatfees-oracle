@@ -106,7 +106,7 @@ func (l *SlogLogger) nextMsgID() string {
 	l.mutex.Lock()
 	defer l.mutex.Unlock()
 	*l.MsgID++
-	return fmt.Sprintf("%s-%d", *l.ID, l.MsgID)
+	return fmt.Sprintf("%s-%d", *l.ID, *l.MsgID)
 }
 
 func (l *SlogLogger) log(level slog.Level, msg string, args ...any) {
