@@ -155,7 +155,7 @@ func (s *SlackNotifier) createLogText(emoji, bold string, message string, msg_id
 		header = fmt.Sprintf("%s *%s*", emoji, bold)
 	}
 
-	text := fmt.Sprintf("%s - <%s|View Logs>\n>%s", header, queryURL, message)
+	text := fmt.Sprintf("%s - <%s|View Logs>\n>%s", header, queryURL, SanitizeMsg(message))
 
 	if len(fields) > 0 {
 		text += fmt.Sprintf("\n```%s```", formatSlackFieldsBlob(fields, 1000))
