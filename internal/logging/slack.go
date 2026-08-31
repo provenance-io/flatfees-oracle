@@ -53,7 +53,7 @@ func LogStartup(log Logger) {
 	log.Info("Flatfees Oracle started")
 	if sn != nil {
 		startupFields := map[string]any{
-			"environment": defaultSlackNotifier.env,
+			"environment": sn.env,
 			"timestamp":   time.Now().Format(time.RFC3339),
 		}
 		sn.NotifyStartup(context.Background(), "Flatfees Oracle started", startupFields)
