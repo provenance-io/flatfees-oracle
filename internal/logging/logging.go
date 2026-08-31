@@ -30,7 +30,7 @@ func New(level, env string) Logger {
 	return &SlogLogger{
 		logger: slogger,
 		ID:     &id,
-		MsgID:  0,
+		MsgID:  new(int64),
 		mutex:  &sync.Mutex{},
 	}
 }
@@ -62,7 +62,7 @@ type Logger interface {
 type SlogLogger struct {
 	logger *slog.Logger
 	ID     *string
-	MsgID  int64
+	MsgID  *int64
 	mutex  *sync.Mutex
 }
 
@@ -94,14 +94,18 @@ func (l *SlogLogger) Fatal(msg string, args ...any) {
 
 // With returns a logger with additional context
 func (l *SlogLogger) With(args ...any) Logger {
-	l.logger = l.logger.With(args...)
-	return l
+	return &SlogLogger{
+		logger: l.logger.With(args...),
+		ID:     l.ID,
+		MsgID:  l.MsgID,
+		mutex:  l.mutex,
+	}
 }
 
 func (l *SlogLogger) nextMsgID() string {
 	l.mutex.Lock()
 	defer l.mutex.Unlock()
-	l.MsgID++
+	*l.MsgID++
 	return fmt.Sprintf("%s-%d", *l.ID, l.MsgID)
 }
 
