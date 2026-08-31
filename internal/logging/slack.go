@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -23,24 +22,22 @@ func RegisterSlackNotifier(notifier *SlackNotifier) {
 }
 
 type SlackNotifier struct {
-	webhookURL  string
-	service     string
-	env         string
-	client      *http.Client
-	mutex       *sync.Mutex
-	testMode    bool
+	webhookURL string
+	service    string
+	env        string
+	client     *http.Client
+	testMode   bool
 }
 
 func NewSlackNotifier(webhookURL string, env string) *SlackNotifier {
 	testMode := env != "mainnet"
 
 	return &SlackNotifier{
-		webhookURL:  webhookURL,
-		service:     serviceName,
-		env:         env,
-		client:      &http.Client{Timeout: 3 * time.Second},
-		mutex:       &sync.Mutex{},
-		testMode:    testMode,
+		webhookURL: webhookURL,
+		service:    serviceName,
+		env:        env,
+		client:     &http.Client{Timeout: 3 * time.Second},
+		testMode:   testMode,
 	}
 }
 
