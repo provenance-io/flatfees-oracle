@@ -14,6 +14,7 @@ import (
 var loadEnvVars = []string{
 	"ORACLE_ENV",
 	"LOG_LEVEL",
+	"SLACK_WEBHOOK_URL",
 	"PRICE_BASE_URL",
 	"GRPC_ENDPOINT",
 	"GRPC_INSECURE",
@@ -58,6 +59,28 @@ func TestLoad(t *testing.T) {
 			envs[k] = v
 		}
 		return envs
+	}
+
+	defaultConfig := Config{
+		Env:               "unknown",
+		LogLevel:          "info",
+		SlackWebhookURL:   "",
+		PriceBaseURL:      "",
+		GRPCEndpoint:      "",
+		GRPCInsecure:      false,
+		ChainID:           "",
+		OracleAddress:     "",
+		PrivateKeyHex:     "",
+		GasAdjustment:     1.5,
+		DryRun:            false,
+		HTTPTimeout:       15 * time.Second,
+		Unordered:         true,
+		UnorderedTimeout:  2 * time.Minute,
+		AccountNumber:     0,
+		MaxPriceMoveRatio: 10,
+		MinTrades:         10,
+		MinVolumeHASH:     100,
+		ForceUpdate:       false,
 	}
 
 	cases := []struct {
@@ -151,6 +174,7 @@ func TestLoad(t *testing.T) {
 			name:     "missing all required fields non-dry-run",
 			envs:     map[string]string{},
 			wantErrs: []string{"missing required config: GRPC_ENDPOINT, CHAIN_ID, ORACLE_ADDRESS, PRIVATE_KEY_HEX"},
+			want: defaultConfig,
 		},
 		{
 			name: "missing GRPC_ENDPOINT non-dry-run",
@@ -160,6 +184,24 @@ func TestLoad(t *testing.T) {
 				"PRIVATE_KEY_HEX": "deadbeef",
 			},
 			wantErrs: []string{"missing required config: GRPC_ENDPOINT"},
+			want: Config{
+				Env:               "unknown",
+				LogLevel:          "info",
+				GRPCInsecure:      false,
+				ChainID:           "pio-mainnet-1",
+				OracleAddress:     "pb1oracle",
+				PrivateKeyHex:     "deadbeef",
+				GasAdjustment:     1.5,
+				DryRun:            false,
+				HTTPTimeout:       15 * time.Second,
+				Unordered:         true,
+				UnorderedTimeout:  2 * time.Minute,
+				AccountNumber:     0,
+				MaxPriceMoveRatio: 10,
+				MinTrades:         10,
+				MinVolumeHASH:     100,
+				ForceUpdate:       false,
+			},
 		},
 		{
 			name: "missing CHAIN_ID non-dry-run",
@@ -169,6 +211,25 @@ func TestLoad(t *testing.T) {
 				"PRIVATE_KEY_HEX": "deadbeef",
 			},
 			wantErrs: []string{"missing required config: CHAIN_ID"},
+			want: Config{
+				Env:               "unknown",
+				LogLevel:          "info",
+				GRPCInsecure:      false,
+				GRPCEndpoint:      "grpc.example:9090",
+				ChainID:           "",
+				OracleAddress:     "pb1oracle",
+				PrivateKeyHex:     "deadbeef",
+				GasAdjustment:     1.5,
+				DryRun:            false,
+				HTTPTimeout:       15 * time.Second,
+				Unordered:         true,
+				UnorderedTimeout:  2 * time.Minute,
+				AccountNumber:     0,
+				MaxPriceMoveRatio: 10,
+				MinTrades:         10,
+				MinVolumeHASH:     100,
+				ForceUpdate:       false,
+			},
 		},
 		{
 			name: "missing ORACLE_ADDRESS non-dry-run",
@@ -178,6 +239,25 @@ func TestLoad(t *testing.T) {
 				"PRIVATE_KEY_HEX": "deadbeef",
 			},
 			wantErrs: []string{"missing required config: ORACLE_ADDRESS"},
+			want: Config{
+				Env:               "unknown",
+				LogLevel:          "info",
+				GRPCInsecure:      false,
+				GRPCEndpoint:      "grpc.example:9090",
+				ChainID:           "pio-mainnet-1",
+				OracleAddress:     "",
+				PrivateKeyHex:     "deadbeef",
+				GasAdjustment:     1.5,
+				DryRun:            false,
+				HTTPTimeout:       15 * time.Second,
+				Unordered:         true,
+				UnorderedTimeout:  2 * time.Minute,
+				AccountNumber:     0,
+				MaxPriceMoveRatio: 10,
+				MinTrades:         10,
+				MinVolumeHASH:     100,
+				ForceUpdate:       false,
+			},
 		},
 		{
 			name: "missing PRIVATE_KEY_HEX non-dry-run",
@@ -187,6 +267,25 @@ func TestLoad(t *testing.T) {
 				"ORACLE_ADDRESS": "pb1oracle",
 			},
 			wantErrs: []string{"missing required config: PRIVATE_KEY_HEX"},
+			want: Config{
+				Env:               "unknown",
+				LogLevel:          "info",
+				GRPCInsecure:      false,
+				GRPCEndpoint:      "grpc.example:9090",
+				ChainID:           "pio-mainnet-1",
+				OracleAddress:     "pb1oracle",
+				PrivateKeyHex:     "",
+				GasAdjustment:     1.5,
+				DryRun:            false,
+				HTTPTimeout:       15 * time.Second,
+				Unordered:         true,
+				UnorderedTimeout:  2 * time.Minute,
+				AccountNumber:     0,
+				MaxPriceMoveRatio: 10,
+				MinTrades:         10,
+				MinVolumeHASH:     100,
+				ForceUpdate:       false,
+			},
 		},
 		{
 			name: "unordered timeout at 5m1s rejected",
@@ -195,6 +294,23 @@ func TestLoad(t *testing.T) {
 				"UNORDERED_TIMEOUT": "5m1s",
 			}),
 			wantErrs: []string{"UNORDERED_TIMEOUT 5m1s must be at most the chain max of 5m"},
+			want: Config{
+				Env:               "unknown",
+				LogLevel:          "info",
+				GRPCEndpoint:      "grpc.example:9090",
+				ChainID:           "pio-mainnet-1",
+				OracleAddress:     "pb1oracle",
+				PrivateKeyHex:     "deadbeef",
+				GasAdjustment:     1.5,
+				HTTPTimeout:       15 * time.Second,
+				Unordered:         true,
+				UnorderedTimeout:  5 * time.Minute + 1 * time.Second,
+				AccountNumber:     0,
+				MaxPriceMoveRatio: 10,
+				MinTrades:         10,
+				MinVolumeHASH:     100,
+				ForceUpdate:       false,
+			},
 		},
 		{
 			name: "unordered timeout over 5m rejected",
@@ -203,6 +319,23 @@ func TestLoad(t *testing.T) {
 				"UNORDERED_TIMEOUT": "10m",
 			}),
 			wantErrs: []string{"UNORDERED_TIMEOUT 10m0s must be at most the chain max of 5m"},
+			want: Config{
+				Env:               "unknown",
+				LogLevel:          "info",
+				GRPCEndpoint:      "grpc.example:9090",
+				ChainID:           "pio-mainnet-1",
+				OracleAddress:     "pb1oracle",
+				PrivateKeyHex:     "deadbeef",
+				GasAdjustment:     1.5,
+				HTTPTimeout:       15 * time.Second,
+				Unordered:         true,
+				UnorderedTimeout:  10 * time.Minute,
+				AccountNumber:     0,
+				MaxPriceMoveRatio: 10,
+				MinTrades:         10,
+				MinVolumeHASH:     100,
+				ForceUpdate:       false,
+			},
 		},
 		{
 			name: "unordered timeout exactly 5m accepted",
@@ -294,56 +427,67 @@ func TestLoad(t *testing.T) {
 			name:     "invalid GAS_ADJUSTMENT",
 			envs:     map[string]string{"GAS_ADJUSTMENT": "abc"},
 			wantErrs: []string{`invalid GAS_ADJUSTMENT float "abc"`},
+			want: defaultConfig,
 		},
 		{
 			name:     "invalid DRY_RUN",
 			envs:     map[string]string{"DRY_RUN": "notabool"},
 			wantErrs: []string{`invalid DRY_RUN bool "notabool"`},
+			want: defaultConfig,
 		},
 		{
 			name:     "invalid GRPC_INSECURE",
 			envs:     map[string]string{"GRPC_INSECURE": "notabool"},
 			wantErrs: []string{`invalid GRPC_INSECURE bool "notabool"`},
+			want: defaultConfig,
 		},
 		{
 			name:     "invalid HTTP_TIMEOUT",
 			envs:     map[string]string{"HTTP_TIMEOUT": "notaduration"},
 			wantErrs: []string{`invalid HTTP_TIMEOUT duration "notaduration"`},
+			want: defaultConfig,
 		},
 		{
 			name:     "invalid UNORDERED",
 			envs:     map[string]string{"UNORDERED": "notabool"},
 			wantErrs: []string{`invalid UNORDERED bool "notabool"`},
+			want: defaultConfig,
 		},
 		{
 			name:     "invalid UNORDERED_TIMEOUT",
 			envs:     map[string]string{"UNORDERED_TIMEOUT": "notaduration"},
 			wantErrs: []string{`invalid UNORDERED_TIMEOUT duration "notaduration"`},
+			want: defaultConfig,
 		},
 		{
 			name:     "invalid ACCOUNT_NUMBER",
 			envs:     map[string]string{"ACCOUNT_NUMBER": "-1"},
 			wantErrs: []string{`invalid ACCOUNT_NUMBER uint64 "-1"`},
+			want: defaultConfig,
 		},
 		{
 			name:     "invalid MAX_PRICE_MOVE_RATIO",
 			envs:     map[string]string{"MAX_PRICE_MOVE_RATIO": "abc"},
 			wantErrs: []string{`invalid MAX_PRICE_MOVE_RATIO float "abc"`},
+			want: defaultConfig,
 		},
 		{
 			name:     "invalid MIN_TRADES",
 			envs:     map[string]string{"MIN_TRADES": "many"},
 			wantErrs: []string{`invalid MIN_TRADES int "many"`},
+			want: defaultConfig,
 		},
 		{
 			name:     "invalid MIN_VOLUME_HASH",
 			envs:     map[string]string{"MIN_VOLUME_HASH": "lots"},
 			wantErrs: []string{`invalid MIN_VOLUME_HASH float "lots"`},
+			want: defaultConfig,
 		},
 		{
 			name:     "invalid FORCE_UPDATE",
 			envs:     map[string]string{"FORCE_UPDATE": "notabool"},
 			wantErrs: []string{`invalid FORCE_UPDATE bool "notabool"`},
+			want: defaultConfig,
 		},
 		{
 			name: "multiple parse errors joined",
@@ -357,11 +501,13 @@ func TestLoad(t *testing.T) {
 				`invalid HTTP_TIMEOUT duration "xyz"`,
 				`invalid ACCOUNT_NUMBER uint64 "-1"`,
 			},
+			want: defaultConfig,
 		},
 		{
 			name:     "parse error takes precedence over missing required",
 			envs:     map[string]string{"GAS_ADJUSTMENT": "abc"},
 			wantErrs: []string{`invalid GAS_ADJUSTMENT float "abc"`},
+			want: defaultConfig,
 		},
 	}
 
@@ -375,11 +521,10 @@ func TestLoad(t *testing.T) {
 				for _, sub := range tc.wantErrs {
 					assert.Contains(t, errStr, sub, "Load() error")
 				}
-				assert.Equal(t, Config{}, got, "Load() config on error")
 			} else {
 				require.NoError(t, err, "Load() error")
-				assert.Equal(t, tc.want, got, "Load() config")
 			}
+			assert.Equal(t, tc.want, got, "Load() config")
 		})
 	}
 }
