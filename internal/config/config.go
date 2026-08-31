@@ -6,6 +6,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"strconv"
 	"strings"
@@ -215,6 +216,10 @@ func getFloat32(key string, def float32, et *errorTracker) float32 {
 		et.Append(fmt.Errorf("invalid %s float %q: %w", key, v, err))
 		return def
 	}
+	if math.IsNaN(rv) || math.IsInf(rv, 0) {
+		et.Append(fmt.Errorf("invalid %s float %q: cannot be NaN or Inf", key, v))
+		return def
+	}
 	return float32(rv)
 }
 
@@ -277,6 +282,10 @@ func getFloat64(key string, def float64, et *errorTracker) float64 {
 	rv, err := strconv.ParseFloat(v, 64)
 	if err != nil {
 		et.Append(fmt.Errorf("invalid %s float %q: %w", key, v, err))
+		return def
+	}
+	if math.IsNaN(rv) || math.IsInf(rv, 0) {
+		et.Append(fmt.Errorf("invalid %s float %q: cannot be NaN or Inf", key, v))
 		return def
 	}
 	return rv
