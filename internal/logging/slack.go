@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 )
@@ -118,7 +119,8 @@ func formatSlackFieldsBlob(fields map[string]any, max int) string {
 	data, _ := json.Marshal(fields)
 	sanitized := SanitizeMsg(string(data))
 	if max > 0 && len(sanitized) > max {
-		return sanitized[:max]
+		// Use ToValidUTF8 here so that we don't get partial utf-8 if :max is in the middle of an emoji.
+		sanitized = strings.ToValidUTF8(sanitized[:max], "")
 	}
 	return sanitized
 }
