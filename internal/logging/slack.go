@@ -76,8 +76,7 @@ func (s *SlackNotifier) NotifyStartup(ctx context.Context, title string, fields 
 
 	if len(fields) > 0 {
 		// attach fields as a JSON blob at the bottom
-		data, _ := json.Marshal(fields)
-		text += fmt.Sprintf("\n```%s```", string(data))
+		text += fmt.Sprintf("\n```%s```", formatSlackFieldsBlob(fields, 0))
 	}
 
 	s.notify(ctx, text)
