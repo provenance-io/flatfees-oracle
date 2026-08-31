@@ -1,5 +1,5 @@
-// Package logging configures structured JSON logging to stdout. Routing to
-// Kibana/Datadog/Slack is handled downstream by the cluster log shipper and
+// Package logging configures structured JSON logging to stdout and Slack.
+// Routing to Kibana/Datadog is handled downstream by the cluster log shipper and
 // Datadog; this package only ensures clean, leveled, consistently-tagged events.
 package logging
 
