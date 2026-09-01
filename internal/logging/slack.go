@@ -41,7 +41,7 @@ func NewSlackNotifier(webhookURL string, env string) *SlackNotifier {
 	}
 }
 
-func LogStartup(log Logger) {
+func LogStartupMsg(log Logger) {
 	// For the first log message, we clear out the defaultSlackNotifier so that calling log.Info
 	// won't also get sent to slack. We'll send a slightly different message to slack.
 	sn := defaultSlackNotifier
