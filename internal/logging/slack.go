@@ -91,6 +91,16 @@ func (s *SlackNotifier) NotifyStartup(ctx context.Context, title string, fields 
 	s.notify(ctx, text)
 }
 
+// A LogNotifier is a function that sends a notification to slack about a log message.
+type LogNotifier func(sn *SlackNotifier, ctx context.Context, message string, msg_id string, fields map[string]any)
+
+var (
+	_ LogNotifier = (*SlackNotifier).NotifyDebug
+	_ LogNotifier = (*SlackNotifier).NotifyInfo
+	_ LogNotifier = (*SlackNotifier).NotifyWarn
+	_ LogNotifier = (*SlackNotifier).NotifyError
+)
+
 // NotifyDebug sends a simple formatted debug message to Slack.
 // It is deliberately best-effort: it will never panic or return an error.
 func (s *SlackNotifier) NotifyDebug(ctx context.Context, message string, msg_id string, fields map[string]any) {

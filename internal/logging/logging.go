@@ -114,27 +114,25 @@ func (l *SlogLogger) log(level slog.Level, msg string, args ...any) {
 	msg_id := l.nextMsgID()
 	args = append(args, "msg_id", msg_id)
 
+	var notifier LogNotifier
 	switch level {
 	case slog.LevelDebug:
 		l.logger.Debug(msg, args...)
+		notifier = (*SlackNotifier).NotifyDebug
 	case slog.LevelInfo:
 		l.logger.Info(msg, args...)
-		if defaultSlackNotifier != nil {
-			// Use background context for Slack notification
-			defaultSlackNotifier.NotifyInfo(context.Background(), msg, msg_id, argsToFields(args))
-		}
+		notifier = (*SlackNotifier).NotifyInfo
 	case slog.LevelWarn:
 		l.logger.Warn(msg, args...)
-		if defaultSlackNotifier != nil {
-			// Use background context for Slack notification
-			defaultSlackNotifier.NotifyWarn(context.Background(), msg, msg_id, argsToFields(args))
-		}
+		notifier = (*SlackNotifier).NotifyWarn
 	case slog.LevelError:
 		l.logger.Error(msg, args...)
-		if defaultSlackNotifier != nil {
-			// Use background context for Slack notification
-			defaultSlackNotifier.NotifyError(context.Background(), msg, msg_id, argsToFields(args))
-		}
+		notifier = (*SlackNotifier).NotifyError
+	}
+
+	if notifier != nil && defaultSlackNotifier != nil {
+		// Use background context for Slack notification
+		notifier(defaultSlackNotifier, context.Background(), msg, msg_id, argsToFields(args))
 	}
 }
 
