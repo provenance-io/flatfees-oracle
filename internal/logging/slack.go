@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -25,19 +26,27 @@ type SlackNotifier struct {
 	webhookURL string
 	service    string
 	env        string
+	logLevel   slog.Level
 	client     *http.Client
 	testMode   bool
+	envEmoji   string
 }
 
-func NewSlackNotifier(webhookURL string, env string) *SlackNotifier {
+func NewSlackNotifier(webhookURL, env, slackLogLevel string) *SlackNotifier {
 	testMode := env != "mainnet"
+	envEmoji := ":truestory:"
+	if testMode {
+		envEmoji = ":you_didnt_see_anything:"
+	}
 
 	return &SlackNotifier{
 		webhookURL: webhookURL,
 		service:    serviceName,
 		env:        env,
+		logLevel:   parseLevel(slackLogLevel),
 		client:     &http.Client{Timeout: 3 * time.Second},
 		testMode:   testMode,
+		envEmoji:   envEmoji,
 	}
 }
 
@@ -82,19 +91,31 @@ func (s *SlackNotifier) NotifyStartup(ctx context.Context, title string, fields 
 	s.notify(ctx, text)
 }
 
+// NotifyDebug sends a simple formatted debug message to Slack.
+// It is deliberately best-effort: it will never panic or return an error.
+func (s *SlackNotifier) NotifyDebug(ctx context.Context, message string, msg_id string, fields map[string]any) {
+	if s == nil || s.webhookURL == "" {
+		return // misconfigured, just do nothing
+	}
+	if s.logLevel > slog.LevelDebug {
+		return // Not configured to output debug messages to slack.
+	}
+
+	text := s.createLogText(":four_leaf_clover:", "DEBUG", message, msg_id, fields)
+	s.notify(ctx, text)
+}
+
 // NotifyInfo sends a simple formatted info message to Slack.
 // It is deliberately best-effort: it will never panic or return an error.
 func (s *SlackNotifier) NotifyInfo(ctx context.Context, message string, msg_id string, fields map[string]any) {
 	if s == nil || s.webhookURL == "" {
 		return // misconfigured, just do nothing
 	}
-
-	emoji := ":point-right:"
-	if s.testMode {
-		emoji = ":point-left:"
+	if s.logLevel > slog.LevelInfo {
+		return // Not configured to output info messages to slack.
 	}
 
-	text := s.createLogText(emoji, "INFO", message, msg_id, fields)
+	text := s.createLogText(":point-right:", "INFO", message, msg_id, fields)
 	s.notify(ctx, text)
 }
 
@@ -104,13 +125,11 @@ func (s *SlackNotifier) NotifyWarn(ctx context.Context, message string, msg_id s
 	if s == nil || s.webhookURL == "" {
 		return // misconfigured, just do nothing
 	}
-
-	emoji := ":firecracker:"
-	if s.testMode {
-		emoji = ":shrug:"
+	if s.logLevel > slog.LevelWarn {
+		return // Not configured to output warn messages to slack.
 	}
 
-	text := s.createLogText(emoji, "WARNING", message, msg_id, fields)
+	text := s.createLogText(":firecracker:", "WARNING", message, msg_id, fields)
 	s.notify(ctx, text)
 }
 
@@ -120,13 +139,10 @@ func (s *SlackNotifier) NotifyError(ctx context.Context, message string, msg_id 
 	if s == nil || s.webhookURL == "" {
 		return // misconfigured, just do nothing
 	}
+	// No need to check the log level here since slog.LevelError is the max,
+	// and we always want error-level messages logged to slack.
 
-	emoji := ":boom:"
-	if s.testMode {
-		emoji = ":information_desk_person:"
-	}
-
-	text := s.createLogText(emoji, "ERROR", message, msg_id, fields)
+	text := s.createLogText(":boom:", "ERROR", message, msg_id, fields)
 	s.notify(ctx, text)
 }
 
@@ -150,7 +166,7 @@ func (s *SlackNotifier) createLogText(emoji, bold string, message string, msg_id
 	queryURL := log_search_url + fmt.Sprintf(query_template, s.service, msg_id, cursorTimestamp, envProjectID)
 
 	// Build a one-line summary plus optional details
-	header := fmt.Sprintf("%s *%s* in `%s - %s`", emoji, bold, s.service, s.env)
+	header := fmt.Sprintf("%s%s *%s* in `%s - %s`", s.envEmoji, emoji, bold, s.service, s.env)
 	if s.service == "" && s.env == "" {
 		header = fmt.Sprintf("%s *%s*", emoji, bold)
 	}

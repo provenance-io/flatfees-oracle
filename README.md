@@ -48,6 +48,7 @@ internal/logging/   structured JSON logging (slog)
 | `ORACLE_ENV`           | no       | `unknown`          | label for logs, e.g. `testnet`/`mainnet`                                                             |
 | `LOG_LEVEL`            | no       | `info`             | debug, info, warn, or error                                                                          |
 | `SLACK_WEBHOOK_URL`    | no       | -                  | URL of the slack webhook                                                                             |
+| `SLACK_LOG_LEVEL`      | no       | `info`             | debug, info, warn, or error for the level of logging that gets sent to slack                         |
 | `GRPC_ENDPOINT`        | yes¹     | –                  | Provenance node gRPC `host:port`                                                                     |
 | `GRPC_INSECURE`        | no       | `false`            | plaintext gRPC transport; only for in-cluster / localhost endpoints on a trusted network             |
 | `CHAIN_ID`             | yes¹     | –                  | target chain id                                                                                      |

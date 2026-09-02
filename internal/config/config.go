@@ -25,6 +25,9 @@ type Config struct {
 	// If empty, logs will not be sent to slack.
 	// Environment variable: SLACK_WEBHOOK_URL.
 	SlackWebhookURL string
+	// SlackLogLevel is one of debug|info|warn|error and is the level at which messages get sent to slack.
+	// Environment variable: SLACK_LOG_LEVEL. Default "info".
+	SlackLogLevel string
 
 	// PriceBaseURL overrides the Figure Markets trades endpoint (optional).
 	// Environment variable: PRICE_BASE_URL.
@@ -111,6 +114,7 @@ func Load() (Config, error) {
 		Env:               getEnv("ORACLE_ENV", "unknown"),
 		LogLevel:          strings.ToLower(getEnv("LOG_LEVEL", "info")),
 		SlackWebhookURL:   getEnv("SLACK_WEBHOOK_URL", ""),
+		SlackLogLevel:     strings.ToLower(getEnv("SLACK_LOG_LEVEL", "info")),
 		PriceBaseURL:      os.Getenv("PRICE_BASE_URL"),
 		GRPCEndpoint:      os.Getenv("GRPC_ENDPOINT"),
 		GRPCInsecure:      getBool("GRPC_INSECURE", false, et),

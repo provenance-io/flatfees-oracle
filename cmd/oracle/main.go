@@ -42,7 +42,7 @@ func run() error {
 	cfg, err := config.Load()
 	// Register the slack notifier regardless of err so that we can get notified of a config load error.
 	if len(cfg.SlackWebhookURL) > 0 {
-		slackNotifier := logging.NewSlackNotifier(cfg.SlackWebhookURL, cfg.Env)
+		slackNotifier := logging.NewSlackNotifier(cfg.SlackWebhookURL, cfg.Env, cfg.SlackLogLevel)
 		logging.RegisterSlackNotifier(slackNotifier)
 	}
 

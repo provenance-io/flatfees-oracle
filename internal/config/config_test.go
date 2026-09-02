@@ -15,6 +15,7 @@ var loadEnvVars = []string{
 	"ORACLE_ENV",
 	"LOG_LEVEL",
 	"SLACK_WEBHOOK_URL",
+	"SLACK_LOG_LEVEL",
 	"PRICE_BASE_URL",
 	"GRPC_ENDPOINT",
 	"GRPC_INSECURE",
@@ -65,6 +66,7 @@ func TestLoad(t *testing.T) {
 		Env:               "unknown",
 		LogLevel:          "info",
 		SlackWebhookURL:   "",
+		SlackLogLevel:     "info",
 		PriceBaseURL:      "",
 		GRPCEndpoint:      "",
 		GRPCInsecure:      false,
@@ -95,6 +97,7 @@ func TestLoad(t *testing.T) {
 			want: Config{
 				Env:               "unknown",
 				LogLevel:          "info",
+				SlackLogLevel:     "info",
 				GasAdjustment:     1.5,
 				DryRun:            true,
 				HTTPTimeout:       15 * time.Second,
@@ -110,6 +113,8 @@ func TestLoad(t *testing.T) {
 			envs: map[string]string{
 				"ORACLE_ENV":           "testnet",
 				"LOG_LEVEL":            "DEBUG",
+				"SLACK_WEBHOOK_URL":    "https://slack.example/",
+				"SLACK_LOG_LEVEL":      "WARN",
 				"PRICE_BASE_URL":       "https://prices.example/trades",
 				"GRPC_ENDPOINT":        "grpc.example:9090",
 				"GRPC_INSECURE":        "true",
@@ -130,6 +135,8 @@ func TestLoad(t *testing.T) {
 			want: Config{
 				Env:               "testnet",
 				LogLevel:          "debug",
+				SlackWebhookURL:   "https://slack.example/",
+				SlackLogLevel:     "warn",
 				PriceBaseURL:      "https://prices.example/trades",
 				GRPCEndpoint:      "grpc.example:9090",
 				GRPCInsecure:      true,
@@ -157,6 +164,7 @@ func TestLoad(t *testing.T) {
 			want: Config{
 				Env:               "unknown",
 				LogLevel:          "info",
+				SlackLogLevel:     "info",
 				GRPCEndpoint:      "grpc.example:9090",
 				ChainID:           "pio-mainnet-1",
 				OracleAddress:     "pb1oracle",
@@ -187,6 +195,7 @@ func TestLoad(t *testing.T) {
 			want: Config{
 				Env:               "unknown",
 				LogLevel:          "info",
+				SlackLogLevel:     "info",
 				GRPCInsecure:      false,
 				ChainID:           "pio-mainnet-1",
 				OracleAddress:     "pb1oracle",
@@ -214,6 +223,7 @@ func TestLoad(t *testing.T) {
 			want: Config{
 				Env:               "unknown",
 				LogLevel:          "info",
+				SlackLogLevel:     "info",
 				GRPCInsecure:      false,
 				GRPCEndpoint:      "grpc.example:9090",
 				ChainID:           "",
@@ -242,6 +252,7 @@ func TestLoad(t *testing.T) {
 			want: Config{
 				Env:               "unknown",
 				LogLevel:          "info",
+				SlackLogLevel:     "info",
 				GRPCInsecure:      false,
 				GRPCEndpoint:      "grpc.example:9090",
 				ChainID:           "pio-mainnet-1",
@@ -270,6 +281,7 @@ func TestLoad(t *testing.T) {
 			want: Config{
 				Env:               "unknown",
 				LogLevel:          "info",
+				SlackLogLevel:     "info",
 				GRPCInsecure:      false,
 				GRPCEndpoint:      "grpc.example:9090",
 				ChainID:           "pio-mainnet-1",
@@ -297,6 +309,7 @@ func TestLoad(t *testing.T) {
 			want: Config{
 				Env:               "unknown",
 				LogLevel:          "info",
+				SlackLogLevel:     "info",
 				GRPCEndpoint:      "grpc.example:9090",
 				ChainID:           "pio-mainnet-1",
 				OracleAddress:     "pb1oracle",
@@ -322,6 +335,7 @@ func TestLoad(t *testing.T) {
 			want: Config{
 				Env:               "unknown",
 				LogLevel:          "info",
+				SlackLogLevel:     "info",
 				GRPCEndpoint:      "grpc.example:9090",
 				ChainID:           "pio-mainnet-1",
 				OracleAddress:     "pb1oracle",
@@ -346,6 +360,7 @@ func TestLoad(t *testing.T) {
 			want: Config{
 				Env:               "unknown",
 				LogLevel:          "info",
+				SlackLogLevel:     "info",
 				GRPCEndpoint:      "grpc.example:9090",
 				ChainID:           "pio-mainnet-1",
 				OracleAddress:     "pb1oracle",
@@ -368,6 +383,7 @@ func TestLoad(t *testing.T) {
 			want: Config{
 				Env:               "unknown",
 				LogLevel:          "info",
+				SlackLogLevel:     "info",
 				GRPCEndpoint:      "grpc.example:9090",
 				ChainID:           "pio-mainnet-1",
 				OracleAddress:     "pb1oracle",
@@ -390,6 +406,7 @@ func TestLoad(t *testing.T) {
 			want: Config{
 				Env:               "unknown",
 				LogLevel:          "info",
+				SlackLogLevel:     "info",
 				GRPCEndpoint:      "grpc.example:9090",
 				ChainID:           "pio-mainnet-1",
 				OracleAddress:     "pb1oracle",
@@ -413,6 +430,7 @@ func TestLoad(t *testing.T) {
 			want: Config{
 				Env:               "unknown",
 				LogLevel:          "info",
+				SlackLogLevel:     "info",
 				GasAdjustment:     1.5,
 				DryRun:            true,
 				HTTPTimeout:       15 * time.Second,
