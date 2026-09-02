@@ -190,6 +190,8 @@ func TestConfirmDeliverTxFailureReturnsRespAndError(t *testing.T) {
 	assert.ErrorContains(t, err, "deliverTx")
 	assert.ErrorContains(t, err, "code 5")
 	assert.ErrorContains(t, err, "insufficient funds")
+	assert.NotErrorIs(t, err, ErrConfirmTimeout,
+		"a definite deliverTx rejection must not be mistaken for an unconfirmed timeout")
 }
 
 func TestConfirmTimeoutSurfacesLastError(t *testing.T) {
@@ -207,6 +209,8 @@ func TestConfirmTimeoutSurfacesLastError(t *testing.T) {
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "not confirmed")
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
+	assert.ErrorIs(t, err, ErrConfirmTimeout,
+		"a ctx-deadline timeout must be identifiable as ErrConfirmTimeout, not a definite rejection")
 	assert.ErrorContains(t, err, "tx not found",
 		"last poll error must appear so operators know what GetTx was reporting")
 }
@@ -230,6 +234,7 @@ func TestConfirmNilTxResponseTimesOutReadably(t *testing.T) {
 	assert.ErrorIs(t, err, errNilTxResponse,
 		"nil TxResponse must be recorded as the sentinel, not silently as nil")
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
+	assert.ErrorIs(t, err, ErrConfirmTimeout)
 	assert.ErrorContains(t, err, "not confirmed")
 	assert.NotContains(t, err.Error(), "%!w",
 		"formatting must not fall through to %%!w(<nil>)")

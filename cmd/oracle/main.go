@@ -230,6 +230,14 @@ func run() error {
 		hash, err = submitter.SubmitOrdered(submitCtx, msg)
 	}
 	if err != nil {
+		if errors.Is(err, tx.ErrConfirmTimeout) {
+			// The tx was broadcast successfully and may still land on chain; we
+			// just stopped watching for it. Not a definite failure, so don't
+			// alarm on-call the same way a real rejection would.
+			log.Warn("tx broadcast but not confirmed before timeout; it may still land",
+				"unordered", cfg.Unordered, "tx_hash", hash, "error", err.Error())
+			return err
+		}
 		log.Error("submit failed", "unordered", cfg.Unordered, "tx_hash", hash, "error", err.Error(), "outcome", "failed")
 		return err
 	}

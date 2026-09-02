@@ -39,6 +39,13 @@ var (
 	// (RootCodespace, code 19). The node has the tx; BroadcastAndConfirm
 	// runs Confirm to wait for it to land.
 	ErrTxAlreadyInMempool = errors.New("tx already in mempool")
+
+	// ErrConfirmTimeout means Broadcast succeeded (the tx passed CheckTx and
+	// entered the mempool) but Confirm's context ran out before the tx was
+	// seen included in a block. The tx did NOT fail — it may still land after
+	// this returns. Callers should treat this as "unconfirmed," not as a
+	// definite on-chain rejection.
+	ErrConfirmTimeout = errors.New("tx not confirmed before context deadline")
 )
 
 // cosmosSDKCodespace and cosmosCodeTxAlreadyInMempool identify the specific
@@ -139,8 +146,8 @@ func (b *Broadcaster) Confirm(ctx context.Context, hash string) (*sdk.TxResponse
 		}
 		select {
 		case <-ctx.Done():
-			return nil, fmt.Errorf("tx %s not confirmed: %w; last poll error: %w",
-				hash, ctx.Err(), lastErr)
+			return nil, fmt.Errorf("%w: tx %s not confirmed: %w; last poll error: %w",
+				ErrConfirmTimeout, hash, ctx.Err(), lastErr)
 		case <-time.After(b.PollInterval):
 		}
 	}
