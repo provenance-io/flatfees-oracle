@@ -1,9 +1,11 @@
 package logging
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -195,6 +197,42 @@ func TestSlogLogger_DispatchesToConfiguredNotifier(t *testing.T) {
 			assert.Contains(t, text, tc.wantText)
 		})
 	}
+}
+
+// LOG_LEVEL (the local stdout threshold) and SLACK_LOG_LEVEL (the Slack
+// threshold) are independent knobs: SlogLogger.log() decides whether to
+// notify Slack based purely on the level passed to Debug/Info/Warn/Error and
+// SlackNotifier's own configured level, regardless of whether the local
+// handler would have suppressed that line on stdout.
+func TestSlogLogger_LocalLevelAndSlackLevelAreIndependent(t *testing.T) {
+	t.Run("LOG_LEVEL=error, SLACK_LOG_LEVEL=debug: debug reaches slack but not stdout", func(t *testing.T) {
+		var buf bytes.Buffer
+		l := newTestLogger(&buf, slog.LevelError) // local threshold: only ERROR+
+
+		srv, bodies := newCapturingServer(t)
+		sn := NewSlackNotifier(srv.URL, "testnet", "debug") // slack threshold: everything
+		withRegisteredNotifier(t, sn)
+
+		l.Debug("debug msg")
+
+		assert.Empty(t, buf.String(), "LOG_LEVEL=error should suppress a Debug line from stdout")
+		require.Len(t, *bodies, 1, "SLACK_LOG_LEVEL=debug should still send the Debug message to slack")
+		assert.Contains(t, slackText(t, (*bodies)[0]), "debug msg")
+	})
+
+	t.Run("LOG_LEVEL=debug, SLACK_LOG_LEVEL=error: debug reaches stdout but not slack", func(t *testing.T) {
+		var buf bytes.Buffer
+		l := newTestLogger(&buf, slog.LevelDebug) // local threshold: everything
+
+		srv, bodies := newCapturingServer(t)
+		sn := NewSlackNotifier(srv.URL, "testnet", "error") // slack threshold: only ERROR+
+		withRegisteredNotifier(t, sn)
+
+		l.Debug("debug msg")
+
+		assert.Contains(t, buf.String(), "debug msg", "LOG_LEVEL=debug should still write the Debug line to stdout")
+		assert.Empty(t, *bodies, "SLACK_LOG_LEVEL=error should suppress the Debug message from slack")
+	})
 }
 
 func TestNotifyInfo_MessageAndFieldsInBody(t *testing.T) {
