@@ -216,7 +216,11 @@ func run() error {
 	}
 
 	// Submit under a FRESH timeout.
-	submitCtx, submitCancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	submitTimeout := time.Minute * 2
+	if cfg.Unordered {
+		submitTimeout = cfg.UnorderedTimeout + time.Second*5 // Add 5 seconds for a little buffer.
+	}
+	submitCtx, submitCancel := context.WithTimeout(context.Background(), submitTimeout)
 	defer submitCancel()
 
 	var hash string
