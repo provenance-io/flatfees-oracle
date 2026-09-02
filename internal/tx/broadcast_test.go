@@ -332,11 +332,15 @@ func TestBroadcastAndConfirmHappyPath(t *testing.T) {
 	assert.Equal(t, 1, svc.getTxCalls)
 }
 
-func TestBroadcastAndConfirmGRPCErrorReturnsOriginalWhenConfirmAlsoFails(t *testing.T) {
-	// gRPC failure means the tx MIGHT be in the mempool (lost-ack) — the new
-	// belt-and-suspenders path polls Confirm on the computed hash. If Confirm
-	// also can't find the tx, we return the ORIGINAL broadcast error so the
-	// operator sees why the wire attempt failed, not just "not confirmed".
+func TestBroadcastAndConfirmSurfacesConfirmTimeoutWhenRecoveryAlsoFails(t *testing.T) {
+	// gRPC failure means the tx MIGHT be in the mempool (lost-ack) — the
+	// belt-and-suspenders path polls Confirm on the computed hash. If that
+	// recovery Confirm also can't find the tx before ctx runs out, the result
+	// is "still unconfirmed" (ErrConfirmTimeout), not a re-statement of the
+	// original wire failure — we genuinely don't know it failed, only that we
+	// stopped watching. The original broadcast error is still wrapped in for
+	// diagnostics.
+	txBytes := []byte("tx")
 	svc := &fakeTxSvc{
 		broadcastFn: func(_ context.Context, _ *txtypes.BroadcastTxRequest) (*txtypes.BroadcastTxResponse, error) {
 			return nil, errors.New("connection refused") // non-retryable, non-gRPC
@@ -350,10 +354,12 @@ func TestBroadcastAndConfirmGRPCErrorReturnsOriginalWhenConfirmAlsoFails(t *test
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
 	defer cancel()
-	hash, err := b.BroadcastAndConfirm(ctx, []byte("tx"))
+	hash, err := b.BroadcastAndConfirm(ctx, txBytes)
 	require.Error(t, err)
-	assert.Empty(t, hash, "no hash to surface when the wire attempt never got a response and Confirm couldn't find the tx")
-	assert.ErrorIs(t, err, ErrBroadcastRPC, "must return the original broadcast error, not the confirm timeout")
+	assert.Equal(t, ComputeTxHash(txBytes), hash,
+		"the locally-computed hash must be surfaced so operators can look up the pending tx")
+	assert.ErrorIs(t, err, ErrConfirmTimeout, "the final outcome is 'still unconfirmed', not a definite failure")
+	assert.ErrorIs(t, err, ErrBroadcastRPC, "the original broadcast error must still be visible for diagnostics")
 	assert.ErrorContains(t, err, "connection refused")
 	assert.GreaterOrEqual(t, svc.getTxCalls, 1, "belt-and-suspenders Confirm must have been attempted")
 }
