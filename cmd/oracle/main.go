@@ -40,13 +40,22 @@ func main() {
 
 func run() error {
 	cfg, err := config.Load()
+	// Register the slack notifier regardless of err so that we can get notified of a config load error.
+	if len(cfg.SlackWebhookURL) > 0 {
+		slackNotifier := logging.NewSlackNotifier(cfg.SlackWebhookURL, cfg.Env, cfg.SlackLogLevel)
+		logging.RegisterSlackNotifier(slackNotifier)
+	}
+
 	if err != nil {
 		// Logger isn't configured yet; emit a minimal structured line.
-		logging.New("error", "unknown").Error("config load failed", "error", err.Error())
+		logging.New("error", cfg.Env).Error("config load failed", "error", err.Error())
 		return err
 	}
 
 	log := logging.New(cfg.LogLevel, cfg.Env)
+
+	logging.LogStartupMsg(log)
+
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
@@ -207,7 +216,11 @@ func run() error {
 	}
 
 	// Submit under a FRESH timeout.
-	submitCtx, submitCancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	submitTimeout := time.Minute * 2
+	if cfg.Unordered {
+		submitTimeout = cfg.UnorderedTimeout + time.Second*5 // Add 5 seconds for a little buffer.
+	}
+	submitCtx, submitCancel := context.WithTimeout(context.Background(), submitTimeout)
 	defer submitCancel()
 
 	var hash string
@@ -217,6 +230,14 @@ func run() error {
 		hash, err = submitter.SubmitOrdered(submitCtx, msg)
 	}
 	if err != nil {
+		if errors.Is(err, tx.ErrConfirmTimeout) {
+			// The tx was broadcast successfully and may still land on chain; we
+			// just stopped watching for it. Not a definite failure, so don't
+			// alarm on-call the same way a real rejection would.
+			log.Warn("tx broadcast but not confirmed before timeout; it may still land",
+				"unordered", cfg.Unordered, "tx_hash", hash, "error", err.Error())
+			return err
+		}
 		log.Error("submit failed", "unordered", cfg.Unordered, "tx_hash", hash, "error", err.Error(), "outcome", "failed")
 		return err
 	}

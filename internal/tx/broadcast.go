@@ -39,6 +39,13 @@ var (
 	// (RootCodespace, code 19). The node has the tx; BroadcastAndConfirm
 	// runs Confirm to wait for it to land.
 	ErrTxAlreadyInMempool = errors.New("tx already in mempool")
+
+	// ErrConfirmTimeout means Broadcast succeeded (the tx passed CheckTx and
+	// entered the mempool) but Confirm's context ran out before the tx was
+	// seen included in a block. The tx did NOT fail — it may still land after
+	// this returns. Callers should treat this as "unconfirmed," not as a
+	// definite on-chain rejection.
+	ErrConfirmTimeout = errors.New("tx not confirmed before context deadline")
 )
 
 // cosmosSDKCodespace and cosmosCodeTxAlreadyInMempool identify the specific
@@ -139,8 +146,8 @@ func (b *Broadcaster) Confirm(ctx context.Context, hash string) (*sdk.TxResponse
 		}
 		select {
 		case <-ctx.Done():
-			return nil, fmt.Errorf("tx %s not confirmed: %w; last poll error: %w",
-				hash, ctx.Err(), lastErr)
+			return nil, fmt.Errorf("%w: tx %s not confirmed: %w; last poll error: %w",
+				ErrConfirmTimeout, hash, ctx.Err(), lastErr)
 		case <-time.After(b.PollInterval):
 		}
 	}
@@ -155,8 +162,10 @@ func (b *Broadcaster) Confirm(ctx context.Context, hash string) (*sdk.TxResponse
 //     the hash the node returned. Success on Confirm becomes success overall.
 //   - ErrBroadcastRPC — every broadcast attempt failed at the transport
 //     layer, so the tx MAY or MAY NOT have reached the node. Poll Confirm on
-//     the locally-computed hash. Success becomes success; timeout returns
-//     the original error.
+//     the locally-computed hash. Success becomes success; if the recovery
+//     Confirm itself times out, that (wrapping ErrConfirmTimeout) is what's
+//     returned, not the original broadcast error — the last thing we know is
+//     "still unconfirmed," not "definitely failed."
 //   - Anything else (ErrCheckTxRejected — insufficient fees, bad signature,
 //     sequence mismatch, etc.) — the tx did NOT enter the mempool. Return
 //     immediately; Confirm would just spin against the ctx deadline to no
@@ -169,12 +178,16 @@ func (b *Broadcaster) BroadcastAndConfirm(ctx context.Context, txBytes []byte) (
 			// Real CheckTx rejection (or unknown wrapper). Confirm can't help.
 			return hash, err
 		}
-		if _, confirmErr := b.Confirm(ctx, confirmHash); confirmErr == nil {
-			// Broadcast complained, but the tx made it to chain. Consider the
-			// run a success and surface the recovered hash.
-			return confirmHash, nil
+		if _, confirmErr := b.Confirm(ctx, confirmHash); confirmErr != nil {
+			// Surface confirmErr (e.g. ErrConfirmTimeout) rather than discarding
+			// it in favor of the original broadcast error: it's the more current
+			// and more informative outcome, while still naming the original
+			// broadcast failure for diagnostics.
+			return confirmHash, fmt.Errorf("%w (recovering from: %w)", confirmErr, err)
 		}
-		return hash, err
+		// Broadcast complained, but the tx made it to chain. Consider the
+		// run a success and surface the recovered hash.
+		return confirmHash, nil
 	}
 	if _, err := b.Confirm(ctx, hash); err != nil {
 		return hash, err

@@ -6,6 +6,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"strconv"
 	"strings"
@@ -20,6 +21,13 @@ type Config struct {
 	// LogLevel is one of debug|info|warn|error.
 	// Environment variable: LOG_LEVEL. Default "info".
 	LogLevel string
+	// SlackWebhookURL is the url of the slack webhook (for posting messages to slack).
+	// If empty, logs will not be sent to slack.
+	// Environment variable: SLACK_WEBHOOK_URL.
+	SlackWebhookURL string
+	// SlackLogLevel is one of debug|info|warn|error and is the level at which messages get sent to slack.
+	// Environment variable: SLACK_LOG_LEVEL. Default "info".
+	SlackLogLevel string
 
 	// PriceBaseURL overrides the Figure Markets trades endpoint (optional).
 	// Environment variable: PRICE_BASE_URL.
@@ -98,13 +106,15 @@ type Config struct {
 	ForceUpdate bool
 }
 
-// Load reads configuration from environment variables, applying defaults and
-// validating required fields.
+// Load reads configuration from environment variables, applying defaults and validating required fields.
+// The config is returned regardless of error, but might have missing (or erroneous) entries.
 func Load() (Config, error) {
 	et := &errorTracker{}
 	c := Config{
 		Env:               getEnv("ORACLE_ENV", "unknown"),
 		LogLevel:          strings.ToLower(getEnv("LOG_LEVEL", "info")),
+		SlackWebhookURL:   getEnv("SLACK_WEBHOOK_URL", ""),
+		SlackLogLevel:     strings.ToLower(getEnv("SLACK_LOG_LEVEL", "info")),
 		PriceBaseURL:      os.Getenv("PRICE_BASE_URL"),
 		GRPCEndpoint:      os.Getenv("GRPC_ENDPOINT"),
 		GRPCInsecure:      getBool("GRPC_INSECURE", false, et),
@@ -124,7 +134,7 @@ func Load() (Config, error) {
 	}
 
 	if et.HasError() {
-		return Config{}, et.GetError()
+		return c, et.GetError()
 	}
 
 	// In non-dry-run mode the chain settings are required.
@@ -143,10 +153,10 @@ func Load() (Config, error) {
 			missing = append(missing, "PRIVATE_KEY_HEX")
 		}
 		if len(missing) > 0 {
-			return Config{}, fmt.Errorf("missing required config: %s", strings.Join(missing, ", "))
+			return c, fmt.Errorf("missing required config: %s", strings.Join(missing, ", "))
 		}
 		if c.Unordered && c.UnorderedTimeout > 5*time.Minute {
-			return Config{}, fmt.Errorf("UNORDERED_TIMEOUT %s must be at most the chain max of 5m", c.UnorderedTimeout)
+			return c, fmt.Errorf("UNORDERED_TIMEOUT %s must be at most the chain max of 5m", c.UnorderedTimeout)
 		}
 	}
 
@@ -208,6 +218,10 @@ func getFloat32(key string, def float32, et *errorTracker) float32 {
 	rv, err := strconv.ParseFloat(v, 32)
 	if err != nil {
 		et.Append(fmt.Errorf("invalid %s float %q: %w", key, v, err))
+		return def
+	}
+	if math.IsNaN(rv) || math.IsInf(rv, 0) {
+		et.Append(fmt.Errorf("invalid %s float %q: cannot be NaN or Inf", key, v))
 		return def
 	}
 	return float32(rv)
@@ -272,6 +286,10 @@ func getFloat64(key string, def float64, et *errorTracker) float64 {
 	rv, err := strconv.ParseFloat(v, 64)
 	if err != nil {
 		et.Append(fmt.Errorf("invalid %s float %q: %w", key, v, err))
+		return def
+	}
+	if math.IsNaN(rv) || math.IsInf(rv, 0) {
+		et.Append(fmt.Errorf("invalid %s float %q: cannot be NaN or Inf", key, v))
 		return def
 	}
 	return rv

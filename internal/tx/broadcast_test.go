@@ -190,6 +190,8 @@ func TestConfirmDeliverTxFailureReturnsRespAndError(t *testing.T) {
 	assert.ErrorContains(t, err, "deliverTx")
 	assert.ErrorContains(t, err, "code 5")
 	assert.ErrorContains(t, err, "insufficient funds")
+	assert.NotErrorIs(t, err, ErrConfirmTimeout,
+		"a definite deliverTx rejection must not be mistaken for an unconfirmed timeout")
 }
 
 func TestConfirmTimeoutSurfacesLastError(t *testing.T) {
@@ -207,6 +209,8 @@ func TestConfirmTimeoutSurfacesLastError(t *testing.T) {
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "not confirmed")
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
+	assert.ErrorIs(t, err, ErrConfirmTimeout,
+		"a ctx-deadline timeout must be identifiable as ErrConfirmTimeout, not a definite rejection")
 	assert.ErrorContains(t, err, "tx not found",
 		"last poll error must appear so operators know what GetTx was reporting")
 }
@@ -230,6 +234,7 @@ func TestConfirmNilTxResponseTimesOutReadably(t *testing.T) {
 	assert.ErrorIs(t, err, errNilTxResponse,
 		"nil TxResponse must be recorded as the sentinel, not silently as nil")
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
+	assert.ErrorIs(t, err, ErrConfirmTimeout)
 	assert.ErrorContains(t, err, "not confirmed")
 	assert.NotContains(t, err.Error(), "%!w",
 		"formatting must not fall through to %%!w(<nil>)")
@@ -327,11 +332,15 @@ func TestBroadcastAndConfirmHappyPath(t *testing.T) {
 	assert.Equal(t, 1, svc.getTxCalls)
 }
 
-func TestBroadcastAndConfirmGRPCErrorReturnsOriginalWhenConfirmAlsoFails(t *testing.T) {
-	// gRPC failure means the tx MIGHT be in the mempool (lost-ack) — the new
-	// belt-and-suspenders path polls Confirm on the computed hash. If Confirm
-	// also can't find the tx, we return the ORIGINAL broadcast error so the
-	// operator sees why the wire attempt failed, not just "not confirmed".
+func TestBroadcastAndConfirmSurfacesConfirmTimeoutWhenRecoveryAlsoFails(t *testing.T) {
+	// gRPC failure means the tx MIGHT be in the mempool (lost-ack) — the
+	// belt-and-suspenders path polls Confirm on the computed hash. If that
+	// recovery Confirm also can't find the tx before ctx runs out, the result
+	// is "still unconfirmed" (ErrConfirmTimeout), not a re-statement of the
+	// original wire failure — we genuinely don't know it failed, only that we
+	// stopped watching. The original broadcast error is still wrapped in for
+	// diagnostics.
+	txBytes := []byte("tx")
 	svc := &fakeTxSvc{
 		broadcastFn: func(_ context.Context, _ *txtypes.BroadcastTxRequest) (*txtypes.BroadcastTxResponse, error) {
 			return nil, errors.New("connection refused") // non-retryable, non-gRPC
@@ -345,10 +354,12 @@ func TestBroadcastAndConfirmGRPCErrorReturnsOriginalWhenConfirmAlsoFails(t *test
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
 	defer cancel()
-	hash, err := b.BroadcastAndConfirm(ctx, []byte("tx"))
+	hash, err := b.BroadcastAndConfirm(ctx, txBytes)
 	require.Error(t, err)
-	assert.Empty(t, hash, "no hash to surface when the wire attempt never got a response and Confirm couldn't find the tx")
-	assert.ErrorIs(t, err, ErrBroadcastRPC, "must return the original broadcast error, not the confirm timeout")
+	assert.Equal(t, ComputeTxHash(txBytes), hash,
+		"the locally-computed hash must be surfaced so operators can look up the pending tx")
+	assert.ErrorIs(t, err, ErrConfirmTimeout, "the final outcome is 'still unconfirmed', not a definite failure")
+	assert.ErrorIs(t, err, ErrBroadcastRPC, "the original broadcast error must still be visible for diagnostics")
 	assert.ErrorContains(t, err, "connection refused")
 	assert.GreaterOrEqual(t, svc.getTxCalls, 1, "belt-and-suspenders Confirm must have been attempted")
 }
