@@ -46,13 +46,14 @@ func (s *Submitter) SubmitOrdered(ctx context.Context, msg sdk.Msg) (string, err
 		return "", err
 	}
 	s.logFees("ordered", accNum, feeResp)
-	if s.DryRun {
-		return "", nil
-	}
 
 	signed, err := s.Signer.BuildOrdered(ctx, msg, feeResp.TotalFees, feeResp.EstimatedGas, accNum, seq)
 	if err != nil {
 		return "", err
+	}
+
+	if s.DryRun {
+		return "", nil
 	}
 	return s.Broadcaster.BroadcastAndConfirm(ctx, signed)
 }
@@ -75,13 +76,14 @@ func (s *Submitter) SubmitUnordered(ctx context.Context, msg sdk.Msg, accNum uin
 		return "", err
 	}
 	s.logFees("unordered", accNum, feeResp)
-	if s.DryRun {
-		return "", nil
-	}
 
 	signed, err := s.Signer.BuildUnordered(ctx, msg, feeResp.TotalFees, feeResp.EstimatedGas, accNum, timeout)
 	if err != nil {
 		return "", err
+	}
+
+	if s.DryRun {
+		return "", nil
 	}
 	return s.Broadcaster.BroadcastAndConfirm(ctx, signed)
 }
