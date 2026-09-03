@@ -1,5 +1,7 @@
 // Command oracle runs once: fetch the HASH price, compute the flatfees
-// conversion factor, and (unless DRY_RUN) submit an on-chain update if it changed.
+// conversion factor, and submit an on-chain update if it changed. With
+// DRY_RUN set, it still runs the full pipeline (including fee simulation)
+// but stops short of signing/broadcasting the tx.
 // It is designed to run as a Kubernetes CronJob; it exits 0 on success (including
 // a no-op skip) and non-zero on failure.
 package main
@@ -120,11 +122,6 @@ func run() error {
 		"converted_amount", modFactor.ConvertedAmount.String(),
 	)
 
-	if cfg.DryRun {
-		log.Info("dry run; not submitting", "outcome", "skipped")
-		return nil
-	}
-
 	// Set the bech32 prefix from the oracle address (only needed when signing).
 	if err := tx.SetChainConfigFromAddress(cfg.OracleAddress, true); err != nil {
 		log.Error("invalid oracle address", "error", err.Error(), "outcome", "failed")
@@ -213,6 +210,7 @@ func run() error {
 		},
 		GasAdjustment: cfg.GasAdjustment,
 		Logger:        log,
+		DryRun:        cfg.DryRun,
 	}
 
 	// Submit under a FRESH timeout.
@@ -240,6 +238,10 @@ func run() error {
 		}
 		log.Error("submit failed", "unordered", cfg.Unordered, "tx_hash", hash, "error", err.Error(), "outcome", "failed")
 		return err
+	}
+	if cfg.DryRun {
+		log.Info("dry run; fees estimated, not submitting", "unordered", cfg.Unordered, "outcome", "skipped")
+		return nil
 	}
 	log.Info("conversion factor updated", "tx_hash", hash, "unordered", cfg.Unordered, "outcome", "submitted")
 

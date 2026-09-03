@@ -27,6 +27,8 @@ type Submitter struct {
 	Account       AccountFetcher
 	GasAdjustment float32
 	Logger        logging.Logger // optional
+	// DryRun, when true, stops after fee estimation and never signs or broadcasts.
+	DryRun bool
 }
 
 // SubmitOrdered builds, signs, and broadcasts an ordered tx using account sequence for replay protection.
@@ -44,6 +46,9 @@ func (s *Submitter) SubmitOrdered(ctx context.Context, msg sdk.Msg) (string, err
 		return "", err
 	}
 	s.logFees("ordered", accNum, feeResp)
+	if s.DryRun {
+		return "", nil
+	}
 
 	signed, err := s.Signer.BuildOrdered(ctx, msg, feeResp.TotalFees, feeResp.EstimatedGas, accNum, seq)
 	if err != nil {
@@ -70,6 +75,9 @@ func (s *Submitter) SubmitUnordered(ctx context.Context, msg sdk.Msg, accNum uin
 		return "", err
 	}
 	s.logFees("unordered", accNum, feeResp)
+	if s.DryRun {
+		return "", nil
+	}
 
 	signed, err := s.Signer.BuildUnordered(ctx, msg, feeResp.TotalFees, feeResp.EstimatedGas, accNum, timeout)
 	if err != nil {

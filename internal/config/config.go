@@ -57,7 +57,8 @@ type Config struct {
 	// Environment variable: GAS_ADJUSTMENT. Default 1.5.
 	GasAdjustment float32
 
-	// DryRun, when true, computes and logs the factor but never broadcasts.
+	// DryRun, when true, runs the full pipeline including fee simulation but
+	// never signs or broadcasts the tx.
 	// Environment variable: DRY_RUN. Default false.
 	DryRun bool
 
@@ -137,27 +138,26 @@ func Load() (Config, error) {
 		return c, et.GetError()
 	}
 
-	// In non-dry-run mode the chain settings are required.
-	if !c.DryRun {
-		var missing []string
-		if c.GRPCEndpoint == "" {
-			missing = append(missing, "GRPC_ENDPOINT")
-		}
-		if c.ChainID == "" {
-			missing = append(missing, "CHAIN_ID")
-		}
-		if c.OracleAddress == "" {
-			missing = append(missing, "ORACLE_ADDRESS")
-		}
-		if c.PrivateKeyHex == "" {
-			missing = append(missing, "PRIVATE_KEY_HEX")
-		}
-		if len(missing) > 0 {
-			return c, fmt.Errorf("missing required config: %s", strings.Join(missing, ", "))
-		}
-		if c.Unordered && c.UnorderedTimeout > 5*time.Minute {
-			return c, fmt.Errorf("UNORDERED_TIMEOUT %s must be at most the chain max of 5m", c.UnorderedTimeout)
-		}
+	// Chain settings are required in all modes: even a dry run connects to the
+	// chain and simulates fees, it just stops short of broadcasting.
+	var missing []string
+	if c.GRPCEndpoint == "" {
+		missing = append(missing, "GRPC_ENDPOINT")
+	}
+	if c.ChainID == "" {
+		missing = append(missing, "CHAIN_ID")
+	}
+	if c.OracleAddress == "" {
+		missing = append(missing, "ORACLE_ADDRESS")
+	}
+	if c.PrivateKeyHex == "" {
+		missing = append(missing, "PRIVATE_KEY_HEX")
+	}
+	if len(missing) > 0 {
+		return c, fmt.Errorf("missing required config: %s", strings.Join(missing, ", "))
+	}
+	if c.Unordered && c.UnorderedTimeout > 5*time.Minute {
+		return c, fmt.Errorf("UNORDERED_TIMEOUT %s must be at most the chain max of 5m", c.UnorderedTimeout)
 	}
 
 	return c, nil
