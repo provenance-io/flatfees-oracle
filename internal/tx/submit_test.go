@@ -159,6 +159,44 @@ func TestSubmitOrderedBroadcastErrorSurfacesHash(t *testing.T) {
 	assert.ErrorContains(t, err, "out of gas")
 }
 
+func TestSubmitOrderedDryRunStopsAfterEstimate(t *testing.T) {
+	est := newTestEstimator()
+	svc := &fakeTxSvc{
+		broadcastFn: func(_ context.Context, _ *txtypes.BroadcastTxRequest) (*txtypes.BroadcastTxResponse, error) {
+			t.Fatal("BroadcastTx must not be called in dry run")
+			return nil, nil
+		},
+	}
+	acct := &accountCounter{accNum: 7, sequence: 3}
+	sub, s := newTestSubmitter(t, est, svc, acct)
+	sub.DryRun = true
+
+	hash, err := sub.SubmitOrdered(context.Background(), testMsg(s.Address()))
+	require.NoError(t, err)
+	assert.Empty(t, hash, "dry run must not return a tx hash")
+	assert.Equal(t, 1, est.calls, "estimator must still be called in dry run")
+	assert.Equal(t, 0, svc.broadcastCalls, "dry run must not broadcast")
+}
+
+func TestSubmitUnorderedDryRunStopsAfterEstimate(t *testing.T) {
+	est := newTestEstimator()
+	svc := &fakeTxSvc{
+		broadcastFn: func(_ context.Context, _ *txtypes.BroadcastTxRequest) (*txtypes.BroadcastTxResponse, error) {
+			t.Fatal("BroadcastTx must not be called in dry run")
+			return nil, nil
+		},
+	}
+	acct := &accountCounter{accNum: 7, sequence: 0}
+	sub, s := newTestSubmitter(t, est, svc, acct)
+	sub.DryRun = true
+
+	hash, err := sub.SubmitUnordered(context.Background(), testMsg(s.Address()), 42, 2*time.Minute)
+	require.NoError(t, err)
+	assert.Empty(t, hash, "dry run must not return a tx hash")
+	assert.Equal(t, 1, est.calls, "estimator must still be called in dry run")
+	assert.Equal(t, 0, svc.broadcastCalls, "dry run must not broadcast")
+}
+
 func TestSubmitUnorderedUsesConfiguredAccountNumberWithoutLookup(t *testing.T) {
 	est := newTestEstimator()
 	svc := &fakeTxSvc{broadcastFn: successBroadcast("H"), getTxFn: successGetTx("H")}

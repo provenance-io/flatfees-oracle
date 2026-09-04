@@ -93,7 +93,29 @@ func TestLoad(t *testing.T) {
 	}{
 		{
 			name: "defaults in dry run",
-			envs: map[string]string{"DRY_RUN": "true"},
+			envs: chainEnvs(map[string]string{"DRY_RUN": "true"}),
+			want: Config{
+				Env:               "unknown",
+				LogLevel:          "info",
+				SlackLogLevel:     "info",
+				GRPCEndpoint:      "grpc.example:9090",
+				ChainID:           "pio-mainnet-1",
+				OracleAddress:     "pb1oracle",
+				PrivateKeyHex:     "deadbeef",
+				GasAdjustment:     1.5,
+				DryRun:            true,
+				HTTPTimeout:       15 * time.Second,
+				Unordered:         true,
+				UnorderedTimeout:  2 * time.Minute,
+				MaxPriceMoveRatio: 10,
+				MinTrades:         10,
+				MinVolumeHASH:     100,
+			},
+		},
+		{
+			name:     "dry run still requires chain config",
+			envs:     map[string]string{"DRY_RUN": "true"},
+			wantErrs: []string{"missing required config: GRPC_ENDPOINT, CHAIN_ID, ORACLE_ADDRESS, PRIVATE_KEY_HEX"},
 			want: Config{
 				Env:               "unknown",
 				LogLevel:          "info",
@@ -421,16 +443,21 @@ func TestLoad(t *testing.T) {
 			},
 		},
 		{
-			name: "large unordered timeout allowed in dry run",
-			envs: map[string]string{
+			name: "large unordered timeout rejected in dry run",
+			envs: chainEnvs(map[string]string{
 				"DRY_RUN":           "true",
 				"UNORDERED":         "true",
 				"UNORDERED_TIMEOUT": "10m",
-			},
+			}),
+			wantErrs: []string{"UNORDERED_TIMEOUT 10m0s must be at most the chain max of 5m"},
 			want: Config{
 				Env:               "unknown",
 				LogLevel:          "info",
 				SlackLogLevel:     "info",
+				GRPCEndpoint:      "grpc.example:9090",
+				ChainID:           "pio-mainnet-1",
+				OracleAddress:     "pb1oracle",
+				PrivateKeyHex:     "deadbeef",
 				GasAdjustment:     1.5,
 				DryRun:            true,
 				HTTPTimeout:       15 * time.Second,
