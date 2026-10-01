@@ -79,6 +79,41 @@ live in the Argo repo:
 Testnet and mainnet share this image; per-environment values live alongside
 the manifest in that repo.
 
+### Publishing a new version
+
+Images are built once and pushed to the test registry, then promoted to the
+prod registry after they've been verified on testnet. Both steps use the shared
+workflows in [provenance-io/gha-workflows](https://github.com/provenance-io/gha-workflows).
+
+| Environment    | Registry                                                            |
+|----------------|---------------------------------------------------------------------|
+| test (testnet) | `us-east1-docker.pkg.dev/provenance-io-test/docker/flatfees-oracle` |
+| prod (mainnet) | `us-central1-docker.pkg.dev/provenance-io/docker/flatfees-oracle`   |
+
+1. **Test** — tag `main` with a version and push the tag:
+
+   ```
+   git checkout main && git pull
+   git tag -s v1.2.3
+   git push origin v1.2.3
+   ```
+
+   The `Docker Build and Deploy Test` workflow builds the image and pushes it to
+   the test registry as `v1.2.3` (plus a `git-<sha>` tag).
+
+2. **Deploy to testnet** — update the image tag in the test overlay of
+   [apps/flatfees-oracle](https://github.com/provenance-io/argo-manifests/tree/main/apps/flatfees-oracle)
+   and merge. Verify a run (e.g. trigger one from the CronJob in Argo with
+   **Create Job**) before promoting.
+
+3. **Prod** — in GitHub, go to **Actions → Docker Tag and Deploy Prod → Run
+   workflow** and enter the tag (`v1.2.3`). This copies the tested image from the
+   test registry to the prod registry (adding only a `/app/version.txt` layer);
+   the code is not rebuilt.
+
+4. **Deploy to mainnet** — update the image tag in the prod overlay in
+   argo-manifests and merge.
+
 ## Develop
 
 ```
