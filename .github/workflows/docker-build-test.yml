@@ -1,0 +1,12 @@
+name: Docker Build and Deploy Test
+on:
+    push:
+        tags:
+            - "v*"
+
+jobs:
+    docker-build:
+        uses: provenance-io/gha-workflows/.github/workflows/docker_build_and_argo_deploy_test.yaml@main
+        secrets: inherit
+        with:
+            argo-app: flatfees-oracle

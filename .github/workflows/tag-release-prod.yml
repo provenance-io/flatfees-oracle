@@ -1,0 +1,16 @@
+name: Docker Tag and Deploy Prod
+on:
+    workflow_dispatch:
+        inputs:
+            docker-tag:
+                description: "Docker image tag to deploy to production"
+                required: true
+                type: string
+
+jobs:
+    flatfees-oracle-release:
+        uses: provenance-io/gha-workflows/.github/workflows/docker_tag_prod_deploy.yaml@main
+        secrets: inherit
+        with:
+            docker-tag: ${{ inputs.docker-tag }}
+            argo-app: flatfees-oracle
