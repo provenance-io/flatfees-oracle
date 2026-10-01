@@ -82,8 +82,9 @@ the manifest in that repo.
 ### Publishing a new version
 
 Images are built once and pushed to the test registry, then promoted to the
-prod registry after they've been verified on testnet. Both steps use the shared
-workflows in [provenance-io/gha-workflows](https://github.com/provenance-io/gha-workflows).
+prod registry after they've been verified on testnet. Both steps are adapted
+from the shared workflows in provenance-io/gha-workflows, which can't be called
+directly because this repo is public and that one is private.
 
 | Environment    | Registry                                                            |
 |----------------|---------------------------------------------------------------------|
