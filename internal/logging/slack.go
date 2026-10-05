@@ -176,7 +176,7 @@ func (s *SlackNotifier) createLogText(emoji, bold string, message string, msg_id
 	queryURL := log_search_url + fmt.Sprintf(query_template, s.service, msg_id, cursorTimestamp, envProjectID)
 
 	// Build a one-line summary plus optional details
-	header := fmt.Sprintf("%s%s *%s* in `%s - %s`", s.envEmoji, emoji, bold, s.service, s.env)
+	header := fmt.Sprintf("%s %s *%s* in `%s - %s`", s.envEmoji, emoji, bold, s.service, s.env)
 	if s.service == "" && s.env == "" {
 		header = fmt.Sprintf("%s *%s*", emoji, bold)
 	}

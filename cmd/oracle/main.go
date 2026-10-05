@@ -133,10 +133,10 @@ func run() error {
 	var creds credentials.TransportCredentials
 	if cfg.GRPCInsecure {
 		creds = insecure.NewCredentials()
-		log.Warn("using insecure gRPC transport", "endpoint", cfg.GRPCEndpoint)
+		// log.Warn("using insecure gRPC transport", "endpoint", cfg.GRPCEndpoint)
 	} else {
 		creds = credentials.NewTLS(&tls.Config{MinVersion: tls.VersionTLS12})
-		log.Info("using secure gRPC transport", "endpoint", cfg.GRPCEndpoint)
+		// log.Info("using secure gRPC transport", "endpoint", cfg.GRPCEndpoint)
 	}
 	conn, err := grpc.NewClient(cfg.GRPCEndpoint, grpc.WithTransportCredentials(creds))
 	if err != nil {
@@ -243,7 +243,7 @@ func run() error {
 		log.Info("dry run; fees estimated, not submitting", "unordered", cfg.Unordered, "outcome", "skipped")
 		return nil
 	}
-	log.Info("conversion factor updated", "tx_hash", hash, "unordered", cfg.Unordered, "outcome", "submitted")
+	log.Info("conversion factor updated", "tx_hash", hash, "unordered", cfg.Unordered, "outcome", "updated")
 
 	return nil
 }
