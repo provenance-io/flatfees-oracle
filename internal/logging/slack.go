@@ -125,7 +125,7 @@ func (s *SlackNotifier) NotifyInfo(ctx context.Context, message string, msg_id s
 		return // Not configured to output info messages to slack.
 	}
 
-	text := s.createLogText(":point-right:", "INFO", message, msg_id, fields)
+	text := s.createLogText(":point_right:", "INFO", message, msg_id, fields)
 	s.notify(ctx, text)
 }
 
